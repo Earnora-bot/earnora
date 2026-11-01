@@ -9,3 +9,6 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   .nav-icon{font-size:20px}
   .bottom-nav{padding-left:3px;padding-right:3px}
 }
+
+/* Profile quick links — Earnora black/red theme */
+.profile-links{display:grid;gap:12px;margin:18px 0 22px}.profile-link{display:flex;align-items:center;gap:12px;min-width:0;padding:15px 13px;border:1px solid #713047;border-radius:16px;background:linear-gradient(110deg,#291019,#151116 72%);color:#fff;text-decoration:none;box-shadow:0 5px 18px #ff23401c;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}.profile-link:active{transform:scale(.985)}.profile-link:hover{border-color:#ff4565;box-shadow:0 0 18px #ff234033}.profile-link-icon{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px;background:#3a1522;font-size:22px}.profile-link-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}.profile-link-copy strong{font-size:14px;letter-spacing:.2px}.profile-link-copy small{font-size:11px;color:#c9aeb7;overflow-wrap:anywhere}.profile-link-action{flex:0 0 auto;padding:8px 9px;border:1px solid #a52e4a;border-radius:10px;color:#ff8297;font-size:10px;font-weight:800;letter-spacing:.3px}.help-link .profile-link-icon{background:#27152d}.payment-link .profile-link-icon{background:#18291f}.profile-links+h3{margin-top:24px}
