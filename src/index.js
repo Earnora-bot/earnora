@@ -6,7 +6,6 @@ async function verifyTelegram(initData, botToken) {
   if (!hash) return null;
 
   params.delete("hash");
-  params.delete("signature");
 
   const data = [...params.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -47,10 +46,15 @@ async function verifyTelegram(initData, botToken) {
     .map(b => b.toString(16).padStart(2, "0"))
     .join("");
 
-  if (calculated !== hash) return null;
+  if (calculated.length !== hash.length) return null;
+  let mismatch = 0;
+  for (let i = 0; i < calculated.length; i++) {
+    mismatch |= calculated.charCodeAt(i) ^ hash.charCodeAt(i);
+  }
+  if (mismatch !== 0) return null;
 
   const authDate = Number(params.get("auth_date"));
-  if (!authDate || Date.now() / 1000 - authDate > 3600) {
+  if (!authDate || authDate > Date.now() / 1000 + 30 || Date.now() / 1000 - authDate > 3600) {
     return null;
   }
 
