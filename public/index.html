@@ -1,40 +1,25 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport"
-    content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09090c">
   <title>Earnora</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <main class="app">
-    <header>
-      <div class="logo">⚡ EARNORA</div>
-      <span class="online">● ONLINE</span>
-    </header>
-
-    <section class="balance">
-      <p>TOTAL BALANCE</p>
-      <h1 id="balance">$0.00</h1>
-      <small>Welcome to Earnora</small>
-    </section>
-
-    <section class="stats">
-      <div class="tile" onclick="showPage('home')">🏠<b>HOME</b></div>
-      <div class="tile" onclick="showPage('tasks')">📋<b>TASKS</b></div>
-      <div class="tile" onclick="showPage('ads')">▶<b>WATCH ADS</b></div>
-      <div class="tile" onclick="showPage('referral')">👥<b>REFERRAL</b></div>
-      <div class="tile" onclick="showPage('profile')">👤<b>PROFILE</b></div>
-    </section>
-
-    <section id="content">
-      <h2>Welcome to Earnora!</h2>
-      <p>Complete tasks and earn rewards.</p>
-    </section>
-
+    <header><div class="logo">⚡ EARNORA</div><span class="online">● ONLINE</span></header>
+    <section class="balance"><p>TOTAL BALANCE</p><h1 id="balance">$0.00</h1><small id="welcome">Your earning dashboard</small></section>
+    <nav class="nav" aria-label="Main navigation">
+      <button class="tile active" data-page="home">⌂<b>HOME</b></button>
+      <button class="tile" data-page="tasks">☷<b>TASKS</b></button>
+      <button class="tile" data-page="ads">▶<b>WATCH AD</b></button>
+      <button class="tile" data-page="referral">♧<b>REFERRAL</b></button>
+      <button class="tile" data-page="profile">◎<b>PROFILE</b></button>
+    </nav>
+    <section id="content" aria-live="polite"><h2>Welcome to Earnora</h2><p>Complete eligible activities to earn rewards.</p></section>
     <footer>Earnora • Earn Smart</footer>
   </main>
   <script src="/app.js"></script>
