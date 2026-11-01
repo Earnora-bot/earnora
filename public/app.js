@@ -17,7 +17,7 @@ const pages = {
       <a class="profile-link official-link" href="https://t.me/flash_bot_update" target="_blank" rel="noopener noreferrer">
         <span class="profile-link-icon">📣</span><span class="profile-link-copy"><strong>Official Channel</strong><small>@flash_bot_update</small></span><span class="profile-link-action">OPEN ↗</span>
       </a>
-      <a class="profile-link help-link" href="https://t.me/earnorav2_bot" target="_blank" rel="noopener noreferrer">
+      <a class="profile-link help-link" href="https://t.me/owner_TaskPay" target="_blank" rel="noopener noreferrer">
         <span class="profile-link-icon">🎧</span><span class="profile-link-copy"><strong>Help Center</strong><small>Contact Earnora Support</small></span><span class="profile-link-action">HELP ↗</span>
       </a>
       <a class="profile-link payment-link" href="https://t.me/flash_bot_pay" target="_blank" rel="noopener noreferrer">
