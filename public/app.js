@@ -16,9 +16,9 @@ const pages = {
 
 function showPage(page) {
   content.innerHTML = pages[page] || pages.home;
-  document.querySelectorAll('.tile').forEach(el => el.classList.toggle('active', el.dataset.page === page));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page === page));
 }
-document.querySelectorAll('.tile').forEach(el => el.addEventListener('click', () => showPage(el.dataset.page)));
+document.querySelectorAll('.nav-item').forEach(el => el.addEventListener('click', () => showPage(el.dataset.page)));
 
 async function loadAccount() {
   if (!tg?.initData) {
