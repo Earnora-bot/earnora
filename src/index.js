@@ -3,6 +3,8 @@ const TASK_REWARD_CENTS = 5;
 const REFERRAL_REWARD_CENTS = 5;
 const MIN_WITHDRAWAL_CENTS = 300;
 const REQUIRED_REFERRALS = 5;
+const TASK_POST_FEE_CENTS = 100;
+const TASK_POST_WALLET = "0x52824938de138886fdf6f7a80262e5c0a173d92c";
 
 const json = (data, status = 200) =>
   Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
@@ -75,6 +77,85 @@ async function notifyReferralAfterFirstTask(db, invitee) {
   ]);
 }
 
+async function notifyUser(env, userId, message) {
+  try { await telegramSend(env, userId, message); }
+  catch (error) { console.error("User notification failed:", error.message); }
+}
+
+async function handleTaskPostDecision(env, callback) {
+  const adminId = String(callback.from?.id || "");
+  const data = String(callback.data || "");
+  const match = data.match(/^taskpost:(accept|reject):(\d+)$/);
+  if (adminId !== ADMIN_ID || !match) {
+    await telegramCall(env, "answerCallbackQuery", {
+      callback_query_id: callback.id, text: "Not authorized.", show_alert: true
+    });
+    return;
+  }
+
+  const decision = match[1];
+  const requestId = Number(match[2]);
+  const db = env.DB;
+  const requestRow = await db.prepare(`SELECT id, telegram_id, title, description,
+    target_url, task_type, chat_id, tx_hash, status
+    FROM task_post_requests WHERE id = ?`).bind(requestId).first();
+
+  if (!requestRow || requestRow.status !== "pending") {
+    await telegramCall(env, "answerCallbackQuery", {
+      callback_query_id: callback.id, text: "This request has already been reviewed.", show_alert: true
+    });
+    return;
+  }
+
+  // Claim the pending request first. Only the callback that changes pending -> accepted/rejected
+  // is allowed to continue, making repeated button presses idempotent.
+  const newStatus = decision === "accept" ? "accepted" : "rejected";
+  const changed = await db.prepare(`UPDATE task_post_requests
+    SET status = ?, reviewed_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status = 'pending'`).bind(newStatus, requestId).run();
+
+  if (!changed.meta?.changes) {
+    await telegramCall(env, "answerCallbackQuery", {
+      callback_query_id: callback.id, text: "Already processed.", show_alert: true
+    });
+    return;
+  }
+
+  let taskId = null;
+  if (decision === "accept") {
+    const created = await db.prepare(`INSERT INTO tasks
+      (title, description, reward_cents, target_url, active, task_type, chat_id)
+      VALUES (?, ?, ?, ?, 1, ?, ?)`)
+      .bind(requestRow.title, requestRow.description, TASK_REWARD_CENTS,
+        requestRow.target_url, requestRow.task_type || "manual", requestRow.chat_id || null).run();
+    taskId = created.meta?.last_row_id || null;
+    await notifyUser(env, requestRow.telegram_id,
+      `✅ Your task posting request #${requestId} has been ACCEPTED.\n` +
+      `Your task is now active${taskId ? ` (Task #${taskId})` : ""}.\n` +
+      `Reward: $0.05 per verified completion.`);
+  } else {
+    await notifyUser(env, requestRow.telegram_id,
+      `❌ Your task posting request #${requestId} has been REJECTED.\n` +
+      `If you believe this is a mistake, contact Earnora support.`);
+  }
+
+  await telegramCall(env, "answerCallbackQuery", {
+    callback_query_id: callback.id,
+    text: decision === "accept" ? "Request accepted; task activated." : "Request rejected."
+  });
+
+  if (callback.message?.chat?.id && callback.message?.message_id) {
+    try {
+      await telegramCall(env, "editMessageReplyMarkup", {
+        chat_id: callback.message.chat.id,
+        message_id: callback.message.message_id,
+        reply_markup: { inline_keyboard: [] }
+      });
+    } catch (error) { console.error("Could not remove review buttons:", error.message); }
+  }
+}
+
+// Process button callbacks separately from ordinary messages.
 async function handleTelegramUpdate(request, env) {
   if (!env.WEBHOOK_SECRET ||
       request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) {
@@ -82,6 +163,22 @@ async function handleTelegramUpdate(request, env) {
   }
   const update = await request.json().catch(() => null);
   if (!update) return json({ error: "Invalid update" }, 400);
+
+  if (update.callback_query) {
+    try { await handleTaskPostDecision(env, update.callback_query); }
+    catch (error) {
+      console.error("Task-post callback failed:", error.message);
+      try {
+        await telegramCall(env, "answerCallbackQuery", {
+          callback_query_id: update.callback_query.id,
+          text: "Could not process this action. Check Worker logs.",
+          show_alert: true
+        });
+      } catch {}
+    }
+    return json({ ok: true });
+  }
+
   const message = update.message;
   if (!message?.from?.id || typeof message.text !== "string") return json({ ok: true });
   const text = message.text.trim();
@@ -180,6 +277,7 @@ async function claimTask(db, uid, taskId) {
   if (completion.status !== "verified") return { error: "Task has not been verified", status: 409 };
   if (completion.claimed_at) return { error: "Reward already claimed", status: 409 };
 
+  // Conditional claim and ledger insert are performed in one D1 batch.
   await db.batch([
     db.prepare(`UPDATE task_completions SET claimed_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'verified' AND claimed_at IS NULL`).bind(completion.id),
@@ -188,9 +286,9 @@ async function claimTask(db, uid, taskId) {
       WHERE id = ? AND status = 'verified' AND claimed_at IS NOT NULL`)
       .bind(completion.reward_cents, completion.id)
   ]);
-  const final = await db.prepare(`SELECT claimed_at FROM task_completions WHERE id = ?`).bind(completion.id).first();
-  const ledgerRow = await db.prepare(`SELECT id FROM ledger WHERE reference_id = ?`).bind(`task:${completion.id}`).first();
-  if (!final?.claimed_at || !ledgerRow) return { error: "Could not claim reward. Please contact support.", status: 500 };
+  const ledgerRow = await db.prepare(`SELECT id FROM ledger WHERE reference_id = ?`)
+    .bind(`task:${completion.id}`).first();
+  if (!ledgerRow) return { error: "Could not claim reward. Please contact support.", status: 500 };
   return { ok: true, reward_cents: completion.reward_cents };
 }
 
@@ -216,16 +314,73 @@ async function handleApi(request, env, url, auth) {
     return json({ tasks: result.results || [] });
   }
 
-  // Manual task submission. The reward is not credited until admin verification and user claim.
+  // Submit a paid task-posting request. TxHash is recorded for manual admin verification only.
+  if (path === "/api/task-post-requests" && request.method === "POST") {
+    const body = await request.json().catch(() => null);
+    const title = String(body?.title || "").trim();
+    const description = String(body?.description || "").trim();
+    const targetUrl = String(body?.target_url || "").trim();
+    const txHash = String(body?.tx_hash || "").trim();
+    const taskType = String(body?.task_type || "manual");
+    const chatId = body?.chat_id ? String(body.chat_id).trim() : null;
+
+    if (!title || title.length > 100) return json({ error: "Task title is required (maximum 100 characters)." }, 400);
+    if (description.length > 1000) return json({ error: "Description must be 1000 characters or fewer." }, 400);
+    if (!/^https?:\/\//i.test(targetUrl)) return json({ error: "Enter a valid http/https task URL." }, 400);
+    if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) return json({ error: "Enter a valid transaction hash (0x followed by 64 hex characters)." }, 400);
+    if (!["manual", "telegram_join"].includes(taskType)) return json({ error: "Invalid task type." }, 400);
+    if (taskType === "telegram_join" && !chatId) return json({ error: "Telegram join tasks require a channel/group chat ID." }, 400);
+
+    let inserted;
+    try {
+      inserted = await db.prepare(`INSERT INTO task_post_requests
+        (telegram_id, title, description, target_url, task_type, chat_id, tx_hash, amount_cents, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
+        .bind(uid, title, description, targetUrl, taskType, chatId, txHash, TASK_POST_FEE_CENTS * 20).run();
+    } catch (error) {
+      if (/UNIQUE|constraint/i.test(error.message || "")) return json({ error: "This transaction hash has already been submitted." }, 409);
+      throw error;
+    }
+
+    const requestId = inserted.meta?.last_row_id;
+    const adminMessage =
+      `🆕 EARNORA TASK POST REQUEST #${requestId}\n\n` +
+      `User ID: ${uid}\n` +
+      `Task: ${title}\n` +
+      `Description: ${description || "(none)"}\n` +
+      `URL: ${targetUrl}\n` +
+      `Type: ${taskType}\n` +
+      `Payment: 1.00 USDT (BEP20)\n` +
+      `To wallet: ${TASK_POST_WALLET}\n` +
+      `TxHash: ${txHash}\n\n` +
+      `MANUAL CHECK REQUIRED: verify BSC network, official USDT contract, exactly 1 USDT, recipient wallet, and successful transaction on BscScan.`;
+    let notified = true;
+    try {
+      await telegramSend(env, ADMIN_ID, adminMessage, {
+        reply_markup: { inline_keyboard: [[
+          { text: "✅ ACCEPT", callback_data: `taskpost:accept:${requestId}` },
+          { text: "❌ REJECT", callback_data: `taskpost:reject:${requestId}` }
+        ]] }
+      });
+    } catch (error) {
+      notified = false;
+      console.error("Admin task-post notification failed:", error.message);
+    }
+    return json({
+      ok: true, request_id: requestId, status: "pending",
+      message: notified
+        ? "Request sent to admin. It will remain pending until payment and task details are checked."
+        : "Request saved, but admin notification failed. Contact support and quote your request ID."
+    }, 201);
+  }
+
   if (path === "/api/tasks/complete" && request.method === "POST") {
     const body = await request.json().catch(() => null);
     const taskId = Number(body?.task_id);
     if (!Number.isInteger(taskId) || taskId < 1) return json({ error: "Invalid task ID" }, 400);
     const task = await db.prepare(`SELECT id, task_type, active FROM tasks WHERE id = ?`).bind(taskId).first();
     if (!task || !task.active) return json({ error: "Task not found or inactive" }, 404);
-    if (task.task_type !== "manual") {
-      return json({ error: "This task uses automatic Telegram verification." }, 409);
-    }
+    if (task.task_type !== "manual") return json({ error: "This task uses automatic Telegram verification." }, 409);
     await db.prepare(`INSERT OR IGNORE INTO task_completions (telegram_id, task_id, status)
       VALUES (?, ?, 'pending')`).bind(uid, taskId).run();
     const completion = await db.prepare(`SELECT status, claimed_at FROM task_completions
@@ -263,28 +418,21 @@ async function handleApi(request, env, url, auth) {
     const body = await request.json().catch(() => null);
     const amount = Number(body?.amount_cents);
     const address = String(body?.payout_address || "").trim();
-    if (!Number.isInteger(amount) || amount < MIN_WITHDRAWAL_CENTS)
-      return json({ error: "Minimum withdrawal is $3.00" }, 400);
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address))
-      return json({ error: "Enter a valid BEP20 wallet address" }, 400);
-    const refs = await db.prepare(`SELECT COUNT(*) AS total FROM referrals
-      WHERE inviter_id = ? AND rewarded = 1`).bind(uid).first();
-    if ((refs?.total || 0) < REQUIRED_REFERRALS)
-      return json({ error: "You need at least 5 rewarded referrals to withdraw" }, 400);
+    if (!Number.isInteger(amount) || amount < MIN_WITHDRAWAL_CENTS) return json({ error: "Minimum withdrawal is $3.00" }, 400);
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) return json({ error: "Enter a valid BEP20 wallet address" }, 400);
+    const refs = await db.prepare(`SELECT COUNT(*) AS total FROM referrals WHERE inviter_id = ? AND rewarded = 1`).bind(uid).first();
+    if ((refs?.total || 0) < REQUIRED_REFERRALS) return json({ error: "You need at least 5 rewarded referrals to withdraw" }, 400);
 
-    const deduction = await db.prepare(`UPDATE users
-      SET balance_cents = balance_cents - ?, reserved_cents = reserved_cents + ?
+    const deduction = await db.prepare(`UPDATE users SET balance_cents = balance_cents - ?, reserved_cents = reserved_cents + ?
       WHERE telegram_id = ? AND balance_cents >= ?`).bind(amount, amount, uid, amount).run();
     if (!deduction.meta?.changes) return json({ error: "Insufficient available balance" }, 400);
     try {
       const inserted = await db.prepare(`INSERT INTO withdrawals
-        (telegram_id, amount_cents, payout_address, status) VALUES (?, ?, ?, 'pending')`)
-        .bind(uid, amount, address).run();
+        (telegram_id, amount_cents, payout_address, status) VALUES (?, ?, ?, 'pending')`).bind(uid, amount, address).run();
       return json({ ok: true, withdrawal_id: inserted.meta?.last_row_id || null, status: "pending" }, 201);
     } catch (error) {
-      await db.prepare(`UPDATE users SET balance_cents = balance_cents + ?,
-        reserved_cents = MAX(0, reserved_cents - ?) WHERE telegram_id = ?`)
-        .bind(amount, amount, uid).run();
+      await db.prepare(`UPDATE users SET balance_cents = balance_cents + ?, reserved_cents = MAX(0, reserved_cents - ?)
+        WHERE telegram_id = ?`).bind(amount, amount, uid).run();
       console.error("Withdrawal save failed:", error.message);
       return json({ error: "Could not save withdrawal request" }, 500);
     }
@@ -300,21 +448,18 @@ async function handleApi(request, env, url, auth) {
       const targetUrl = String(body?.target_url || "").trim();
       const taskType = String(body?.task_type || "manual");
       const chatId = body?.chat_id ? String(body.chat_id).trim() : null;
-      if (!title || !targetUrl || !/^https?:\/\//i.test(targetUrl))
-        return json({ error: "Enter a task title and valid task URL" }, 400);
+      if (!title || !targetUrl || !/^https?:\/\//i.test(targetUrl)) return json({ error: "Enter a task title and valid task URL" }, 400);
       if (!["manual", "telegram_join"].includes(taskType)) return json({ error: "Invalid task type" }, 400);
-      if (taskType === "telegram_join" && !chatId)
-        return json({ error: "Telegram join tasks require chat_id" }, 400);
+      if (taskType === "telegram_join" && !chatId) return json({ error: "Telegram join tasks require chat_id" }, 400);
       const result = await db.prepare(`INSERT INTO tasks
         (title, description, reward_cents, target_url, active, task_type, chat_id)
-        VALUES (?, ?, ?, ?, 1, ?, ?)`)
-        .bind(title, description, TASK_REWARD_CENTS, targetUrl, taskType, chatId).run();
+        VALUES (?, ?, ?, ?, 1, ?, ?)`).bind(title, description, TASK_REWARD_CENTS, targetUrl, taskType, chatId).run();
       return json({ ok: true, task_id: result.meta?.last_row_id || null }, 201);
     }
 
     if (path === "/api/admin/tasks" && request.method === "GET") {
-      const result = await db.prepare(`SELECT id, title, description, reward_cents,
-        target_url, active, task_type, chat_id FROM tasks ORDER BY id DESC`).all();
+      const result = await db.prepare(`SELECT id, title, description, reward_cents, target_url, active, task_type, chat_id
+        FROM tasks ORDER BY id DESC`).all();
       return json({ tasks: result.results || [] });
     }
 
@@ -323,30 +468,23 @@ async function handleApi(request, env, url, auth) {
       const invitee = String(body?.telegram_id || "");
       const taskId = Number(body?.task_id);
       const decision = String(body?.decision || "verify");
-      if (!/^\\d+$/.test(invitee) || !Number.isInteger(taskId) || taskId < 1)
-        return json({ error: "Valid Telegram ID and task ID required" }, 400);
+      if (!/^\d+$/.test(invitee) || !Number.isInteger(taskId) || taskId < 1) return json({ error: "Valid Telegram ID and task ID required" }, 400);
       if (!["verify", "reject"].includes(decision)) return json({ error: "Invalid decision" }, 400);
-      const completion = await db.prepare(`SELECT id, status FROM task_completions
-        WHERE telegram_id = ? AND task_id = ?`).bind(invitee, taskId).first();
+      const completion = await db.prepare(`SELECT id, status FROM task_completions WHERE telegram_id = ? AND task_id = ?`).bind(invitee, taskId).first();
       if (!completion) return json({ error: "Task completion not found" }, 404);
-      if (completion.status === "verified" || completion.status === "rejected")
-        return json({ error: "Task already reviewed" }, 409);
+      if (completion.status === "verified" || completion.status === "rejected") return json({ error: "Task already reviewed" }, 409);
       if (decision === "reject") {
-        await db.prepare(`UPDATE task_completions SET status = 'rejected'
-          WHERE id = ? AND status = 'pending'`).bind(completion.id).run();
+        await db.prepare(`UPDATE task_completions SET status = 'rejected' WHERE id = ? AND status = 'pending'`).bind(completion.id).run();
         return json({ ok: true, status: "rejected" });
       }
-      await db.prepare(`UPDATE task_completions SET status = 'verified',
-        verified_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`)
-        .bind(completion.id).run();
+      await db.prepare(`UPDATE task_completions SET status = 'verified', verified_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`).bind(completion.id).run();
       await notifyReferralAfterFirstTask(db, invitee);
       return json({ ok: true, status: "verified" });
     }
 
     if (path === "/api/admin/withdrawals" && request.method === "GET") {
-      const result = await db.prepare(`SELECT id, telegram_id, amount_cents,
-        payout_address, status, tx_hash, created_at FROM withdrawals
-        ORDER BY id DESC LIMIT 100`).all();
+      const result = await db.prepare(`SELECT id, telegram_id, amount_cents, payout_address, status, tx_hash, created_at
+        FROM withdrawals ORDER BY id DESC LIMIT 100`).all();
       return json({ withdrawals: result.results || [] });
     }
 
@@ -355,30 +493,20 @@ async function handleApi(request, env, url, auth) {
       const withdrawalId = Number(body?.withdrawal_id);
       const decision = String(body?.decision || "");
       const txHash = String(body?.tx_hash || "").trim();
-      if (!Number.isInteger(withdrawalId) || withdrawalId < 1)
-        return json({ error: "Invalid withdrawal ID" }, 400);
-      if (!["approve", "reject"].includes(decision))
-        return json({ error: "Invalid decision" }, 400);
-      const withdrawal = await db.prepare(`SELECT id, telegram_id, amount_cents, status
-        FROM withdrawals WHERE id = ?`).bind(withdrawalId).first();
-      if (!withdrawal || withdrawal.status !== "pending")
-        return json({ error: "Pending withdrawal not found" }, 404);
-      if (decision === "approve" && !txHash)
-        return json({ error: "Enter the transaction hash after payment" }, 400);
+      if (!Number.isInteger(withdrawalId) || withdrawalId < 1) return json({ error: "Invalid withdrawal ID" }, 400);
+      if (!["approve", "reject"].includes(decision)) return json({ error: "Invalid decision" }, 400);
+      const withdrawal = await db.prepare(`SELECT id, telegram_id, amount_cents, status FROM withdrawals WHERE id = ?`).bind(withdrawalId).first();
+      if (!withdrawal || withdrawal.status !== "pending") return json({ error: "Pending withdrawal not found" }, 404);
+      if (decision === "approve" && !txHash) return json({ error: "Enter the transaction hash after payment" }, 400);
       if (decision === "approve") {
         await db.batch([
-          db.prepare(`UPDATE withdrawals SET status = 'paid', tx_hash = ?,
-            reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`)
-            .bind(txHash, withdrawalId),
-          db.prepare(`UPDATE users SET reserved_cents = MAX(0, reserved_cents - ?)
-            WHERE telegram_id = ?`).bind(withdrawal.amount_cents, withdrawal.telegram_id)
+          db.prepare(`UPDATE withdrawals SET status = 'paid', tx_hash = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`).bind(txHash, withdrawalId),
+          db.prepare(`UPDATE users SET reserved_cents = MAX(0, reserved_cents - ?) WHERE telegram_id = ?`).bind(withdrawal.amount_cents, withdrawal.telegram_id)
         ]);
       } else {
         await db.batch([
-          db.prepare(`UPDATE withdrawals SET status = 'rejected',
-            reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`).bind(withdrawalId),
-          db.prepare(`UPDATE users SET balance_cents = balance_cents + ?,
-            reserved_cents = MAX(0, reserved_cents - ?) WHERE telegram_id = ?`)
+          db.prepare(`UPDATE withdrawals SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`).bind(withdrawalId),
+          db.prepare(`UPDATE users SET balance_cents = balance_cents + ?, reserved_cents = MAX(0, reserved_cents - ?) WHERE telegram_id = ?`)
             .bind(withdrawal.amount_cents, withdrawal.amount_cents, withdrawal.telegram_id)
         ]);
       }
