@@ -1,4 +1,3 @@
-
 const tg = window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
@@ -6,530 +5,218 @@ tg?.expand();
 const content = document.getElementById("content");
 const balance = document.getElementById("balance");
 const welcome = document.getElementById("welcome");
+const TASK_POST_WALLET = "0x52824938de138886fdf6f7a80262e5c0a173d92c";
 
-const money = cents =>
-  `$${(Number(cents || 0) / 100).toFixed(2)}`;
-
+const money = cents => `$${(Number(cents || 0) / 100).toFixed(2)}`;
 const headers = () => ({
   "Content-Type": "application/json",
   "X-Telegram-Init-Data": tg?.initData || ""
 });
 
 const pages = {
-  home: `
-    <h2>Welcome to Earnora</h2>
+  home: `<h2>Welcome to Earnora</h2>
     <p>Your balance and earning activity will appear here.</p>
-    <div class="notice">
-      Use the menu below to explore Tasks, Watch Ads, Referrals and Profile.
-    </div>
-  `,
-
-  tasks: `
-    <h2>📋 Available Tasks</h2>
-    <div class="loading">Loading tasks...</div>
-  `,
-
-  ads: `
-    <h2>▶ Watch Ads</h2>
+    <div class="notice">Use the menu below to explore Tasks, Watch Ads, Referrals and Profile.</div>`,
+  tasks: `<h2>📋 Available Tasks</h2>
+    <button id="show-post-task" class="post-task-toggle" type="button">＋ POST A TASK <span>$1.00 USDT</span></button>
+    <div id="post-task-area"></div>
+    <div id="task-results" class="loading">Loading tasks...</div>`,
+  ads: `<h2>▶ Watch Ads</h2>
     <p>Reward: <strong>$0.01</strong> per eligible completed ad.</p>
-    <div class="notice">
-      Ads are not enabled yet. Rewards will only be credited after Monetag confirms a completed view.
-    </div>
-    <button disabled class="disabled">ADS NOT CONFIGURED YET</button>
-  `,
-
-  referral: `
-    <h2>👥 Invite Friends</h2>
+    <div class="notice">Ads are not enabled yet. Rewards will only be credited after Monetag confirms a completed view.</div>
+    <button disabled class="disabled">ADS NOT CONFIGURED YET</button>`,
+  referral: `<h2>👥 Invite Friends</h2>
     <p>Earn <strong>$0.05</strong> for each verified referral.</p>
-    <div id="referral-box" class="loading">
-      Loading your referral link...
-    </div>
-    <div class="notice">
-      A referral is counted only after your invited friend completes their first eligible verified task. Self-referrals and duplicate rewards are blocked.
-    </div>
-  `,
-
-  profile: `
-    <h2>👤 Profile</h2>
+    <div id="referral-box" class="loading">Loading your referral link...</div>
+    <div class="notice">A referral is counted only after your invited friend completes their first eligible verified task. Self-referrals and duplicate rewards are blocked.</div>`,
+  profile: `<h2>👤 Profile</h2>
     <p>Manage your Earnora account and get official updates.</p>
-
     <div class="profile-links">
-
-      <a class="profile-link official-link"
-        href="https://t.me/flash_bot_update"
-        target="_blank" rel="noopener noreferrer">
-        <span class="profile-link-icon">📣</span>
-        <span class="profile-link-copy">
-          <strong>Official Channel</strong>
-          <small>@flash_bot_update</small>
-        </span>
-        <span class="profile-link-action">OPEN ↗</span>
-      </a>
-
-      <a class="profile-link help-link"
-        href="https://t.me/earnorav2_bot"
-        target="_blank" rel="noopener noreferrer">
-        <span class="profile-link-icon">🎧</span>
-        <span class="profile-link-copy">
-          <strong>Help Center</strong>
-          <small>Contact Earnora Support</small>
-        </span>
-        <span class="profile-link-action">HELP ↗</span>
-      </a>
-
-      <a class="profile-link payment-link"
-        href="https://t.me/flash_bot_pay"
-        target="_blank" rel="noopener noreferrer">
-        <span class="profile-link-icon">🧾</span>
-        <span class="profile-link-copy">
-          <strong>Payment Channel</strong>
-          <small>@flash_bot_pay · Payment proofs</small>
-        </span>
-        <span class="profile-link-action">VIEW ↗</span>
-      </a>
-
+      <a class="profile-link official-link" href="https://t.me/flash_bot_update" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">📣</span><span class="profile-link-copy"><strong>Official Channel</strong><small>@flash_bot_update</small></span><span class="profile-link-action">OPEN ↗</span></a>
+      <a class="profile-link help-link" href="https://t.me/earnorav2_bot" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">🎧</span><span class="profile-link-copy"><strong>Help Center</strong><small>Contact Earnora Support</small></span><span class="profile-link-action">HELP ↗</span></a>
+      <a class="profile-link payment-link" href="https://t.me/flash_bot_pay" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">🧾</span><span class="profile-link-copy"><strong>Payment Channel</strong><small>@flash_bot_pay · Payment proofs</small></span><span class="profile-link-action">VIEW ↗</span></a>
     </div>
-
     <h3>💸 Withdraw Funds</h3>
-
-    <div class="withdraw-summary">
-      <span>Minimum withdrawal</span>
-      <strong>$3.00</strong>
-    </div>
-
-    <div class="withdraw-summary">
-      <span>Verified referrals required</span>
-      <strong>5</strong>
-    </div>
-
-    <div class="notice">
-      Only Trust Wallet BEP20 addresses are accepted.
-      Other wallets and networks are not supported.
-      Never enter your recovery phrase or private key.
-    </div>
-
+    <div class="withdraw-summary"><span>Minimum withdrawal</span><strong>$3.00</strong></div>
+    <div class="withdraw-summary"><span>Verified referrals required</span><strong>5</strong></div>
+    <div class="notice">Only Trust Wallet BEP20 addresses are accepted. Other wallets and networks are not supported. Never enter your recovery phrase or private key.</div>
     <form id="withdraw-form" class="withdraw-form">
-
-      <label for="withdraw-amount">Amount (USD)</label>
-
-      <input
-        id="withdraw-amount"
-        name="amount"
-        type="number"
-        min="3"
-        step="0.01"
-        placeholder="3.00"
-        required
-      >
-
-      <label for="withdraw-address">
-        Trust Wallet BEP20 address
-      </label>
-
-      <input
-        id="withdraw-address"
-        name="address"
-        type="text"
-        placeholder="0x..."
-        minlength="42"
-        maxlength="42"
-        required
-      >
-
-      <button type="submit" class="primary-button">
-        REQUEST WITHDRAWAL
-      </button>
-
-      <p id="withdraw-status"
-        class="form-status"
-        aria-live="polite"></p>
-
+      <label for="withdraw-amount">Amount (USD)</label><input id="withdraw-amount" name="amount" type="number" min="3" step="0.01" placeholder="3.00" required>
+      <label for="withdraw-address">Trust Wallet BEP20 address</label><input id="withdraw-address" name="address" type="text" placeholder="0x..." minlength="42" maxlength="42" required>
+      <button type="submit" class="primary-button">REQUEST WITHDRAWAL</button>
+      <p id="withdraw-status" class="form-status" aria-live="polite"></p>
     </form>
-
-    <p class="muted-note">
-      Requests are reviewed manually by the Earnora admin.
-      The requested amount is deducted from your available balance
-      while the request is pending.
-    </p>
-  `
+    <p class="muted-note">Requests are reviewed manually by the Earnora admin. The requested amount is deducted from your available balance while pending.</p>`
 };
 
-let currentPage = "home";
-
 function showPage(page) {
-  currentPage = page;
-
   content.innerHTML = pages[page] || pages.home;
-
-  document.querySelectorAll(".nav-item").forEach(el => {
-    el.classList.toggle(
-      "active",
-      el.dataset.page === page
-    );
-  });
-
-  if (page === "tasks") loadTasks();
+  document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.page === page));
+  if (page === "tasks") { bindTaskPosting(); loadTasks(); }
   if (page === "referral") loadReferral();
   if (page === "profile") bindWithdrawal();
 }
-
-document.querySelectorAll(".nav-item").forEach(el => {
-  el.addEventListener("click", () => {
-    showPage(el.dataset.page);
-  });
-});
+document.querySelectorAll(".nav-item").forEach(el => el.addEventListener("click", () => showPage(el.dataset.page)));
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      ...headers(),
-      ...(options.headers || {})
-    }
-  });
-
+  const response = await fetch(path, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
   const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      data.error || "Request failed. Please try again."
-    );
-  }
-
+  if (!response.ok) throw new Error(data.error || "Request failed. Please try again.");
   return data;
 }
 
-// Account information
 async function loadAccount() {
   if (!tg?.initData) {
-    welcome.textContent =
-      "Open this Mini App inside Telegram to sign in.";
-
-    content.innerHTML = `
-      <h2>Open Earnora in Telegram</h2>
-      <p>Your Telegram account is required to load a real balance.</p>
-      <div class="notice">
-        This preview does not create or credit a wallet balance.
-      </div>
-    `;
-
+    welcome.textContent = "Open this Mini App inside Telegram to sign in.";
+    content.innerHTML = `<h2>Open Earnora in Telegram</h2><p>Your Telegram account is required to load a real balance.</p><div class="notice">This preview does not create or credit a wallet balance.</div>`;
     return;
   }
-
   try {
     const data = await api("/api/me");
-
-    balance.textContent = money(
-      data.user.balance_cents
-    );
-
-    welcome.textContent =
-      `Welcome, ${data.user.first_name || "Earnora user"}`;
-
-  } catch {
-    welcome.textContent =
-      "Unable to load account. Please try again.";
-  }
+    balance.textContent = money(data.user.balance_cents);
+    welcome.textContent = `Welcome, ${data.user.first_name || "Earnora user"}`;
+  } catch { welcome.textContent = "Unable to load account. Please try again."; }
 }
 
-// Tasks
-async function loadTasks() {
-  const holder = content.querySelector(".loading");
-
-  if (!holder) return;
-
-  try {
-    const data = await api("/api/tasks");
-
-    if (!data.tasks?.length) {
-      holder.outerHTML = `
-        <div class="empty-state">
-          No tasks are available right now.
-          Please check again later.
-        </div>
-      `;
-      return;
-    }
-
-    holder.outerHTML = `
-      <div class="task-list">
-
-        ${data.tasks.map(task => `
-          <article class="task-card"
-            data-task-id="${Number(task.id)}">
-
-            <div class="task-top">
-
-              <span class="task-tag">
-                ${task.completed ? "COMPLETED" : "AVAILABLE"}
-              </span>
-
-              <strong>
-                +${money(task.reward_cents)}
-              </strong>
-
-            </div>
-
-            <h3>${escapeHtml(task.title)}</h3>
-
-            <p>
-              ${escapeHtml(
-                task.description ||
-                "Complete this task to earn a reward."
-              )}
-            </p>
-
-            <a class="task-open"
-              href="${safeUrl(task.target_url)}"
-              target="_blank"
-              rel="noopener noreferrer">
-              OPEN TASK ↗
-            </a>
-
-            <button
-              type="button"
-              class="primary-button task-submit"
-              data-task-id="${Number(task.id)}"
-              ${task.completed ? "disabled" : ""}>
-              ${task.completed
-                ? "COMPLETED"
-                : "SUBMIT FOR VERIFICATION"}
-            </button>
-
-            <small class="muted-note">
-              Reward is credited only after admin verification.
-            </small>
-
-            <p class="form-status task-status"
-              aria-live="polite"></p>
-
-          </article>
-        `).join("")}
-
-      </div>
-    `;
-
-    content.querySelectorAll(".task-submit").forEach(button => {
-
-      button.addEventListener("click", async () => {
-
-        const taskId = Number(button.dataset.taskId);
-
-        const card = button.closest(".task-card");
-        const status = card.querySelector(".task-status");
-
-        button.disabled = true;
-        button.textContent = "SUBMITTING...";
-        status.textContent = "";
-
-        try {
-          const result = await api(
-            "/api/tasks/complete",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                task_id: taskId
-              })
-            }
-          );
-
-          if (result.status === "verified") {
-            button.textContent = "COMPLETED";
-            status.textContent =
-              "Task already verified.";
-          } else {
-            button.textContent = "SUBMITTED";
-            status.textContent =
-              "Submitted successfully. Waiting for verification.";
-          }
-
-        } catch (error) {
-          button.disabled = false;
-          button.textContent = "SUBMIT FOR VERIFICATION";
-          status.textContent = error.message;
-        }
-
-      });
-
+function bindTaskPosting() {
+  const toggle = document.getElementById("show-post-task");
+  const area = document.getElementById("post-task-area");
+  if (!toggle || !area) return;
+  toggle.addEventListener("click", () => {
+    if (area.innerHTML) { area.innerHTML = ""; return; }
+    area.innerHTML = `
+      <form id="post-task-form" class="post-task-form">
+        <h3>Post a new task</h3>
+        <div class="notice">Pay exactly <strong>$1.00 USDT</strong> on BNB Smart Chain (BEP20) to the wallet below. Then enter your transaction hash. Admin checks every payment manually; your task is NOT activated just by submitting a TxHash.</div>
+        <label for="post-title">Task Title</label><input id="post-title" maxlength="100" required placeholder="Enter task title">
+        <label for="post-description">Description</label><textarea id="post-description" maxlength="1000" rows="3" placeholder="Explain what users must do"></textarea>
+        <label for="post-url">Task URL</label><input id="post-url" type="url" required placeholder="https://...">
+        <label>Payment network</label><input value="BNB Smart Chain · USDT BEP20 · $1.00" readonly>
+        <label>Send USDT to this wallet</label>
+        <div class="wallet-copy-row"><input id="post-wallet" value="${TASK_POST_WALLET}" readonly><button id="copy-post-wallet" type="button" class="copy-button">COPY</button></div>
+        <label for="post-txhash">Transaction Hash (TxHash)</label><input id="post-txhash" required placeholder="0x + 64 characters" autocomplete="off">
+        <button type="submit" class="primary-button">SEND TO ADMIN</button>
+        <p id="post-task-status" class="form-status" aria-live="polite"></p>
+        <p class="muted-note">Do not send funds on another network or token. Never share your wallet recovery phrase or private key. Payment is subject to manual verification.</p>
+      </form>`;
+    document.getElementById("copy-post-wallet").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(TASK_POST_WALLET); }
+      catch { const input = document.getElementById("post-wallet"); input.select(); document.execCommand("copy"); }
+      document.getElementById("post-task-status").textContent = "Wallet address copied.";
     });
-
-  } catch (error) {
-    holder.outerHTML = `
-      <div class="notice">
-        ${escapeHtml(error.message)}
-      </div>
-    `;
-  }
-}
-
-// Referral
-async function loadReferral() {
-  const holder = document.getElementById("referral-box");
-
-  if (!holder) return;
-
-  try {
-    const data = await api("/api/referral");
-
-    holder.innerHTML = `
-      <div class="referral-count">
-        <strong>${Number(data.verified_referrals || 0)}</strong>
-        <span>Verified referrals</span>
-      </div>
-
-      <label for="my-referral-link">
-        Your personal referral link
-      </label>
-
-      <div class="copy-row">
-
-        <input
-          id="my-referral-link"
-          value="${escapeHtml(data.referral_link)}"
-          readonly
-        >
-
-        <button
-          id="copy-referral"
-          type="button"
-          class="copy-button">
-          COPY
-        </button>
-
-      </div>
-
-      <p id="copy-status"
-        class="form-status"
-        aria-live="polite"></p>
-    `;
-
-    document.getElementById("copy-referral")
-      .addEventListener("click", async () => {
-
-        const link =
-          document.getElementById("my-referral-link").value;
-
-        const status =
-          document.getElementById("copy-status");
-
-        try {
-          await navigator.clipboard.writeText(link);
-        } catch {
-          const input =
-            document.getElementById("my-referral-link");
-
-          input.select();
-          document.execCommand("copy");
-        }
-
-        status.textContent = "Referral link copied!";
-      });
-
-  } catch (error) {
-    holder.outerHTML = `
-      <div class="notice">
-        ${escapeHtml(error.message)}
-      </div>
-    `;
-  }
-}
-
-// Withdrawals
-function bindWithdrawal() {
-  const form = document.getElementById("withdraw-form");
-
-  if (!form) return;
-
-  form.addEventListener("submit", async event => {
-
-    event.preventDefault();
-
-    const status =
-      document.getElementById("withdraw-status");
-
-    const button =
-      form.querySelector('button[type="submit"]');
-
-    const amount =
-      Number(document.getElementById("withdraw-amount").value);
-
-    const address =
-      document.getElementById("withdraw-address")
-        .value.trim();
-
-    if (!Number.isFinite(amount) || amount < 3) {
-      status.textContent =
-        "Minimum withdrawal is $3.00.";
-      return;
-    }
-
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      status.textContent =
-        "Enter a valid BEP20 address starting with 0x.";
-      return;
-    }
-
-    button.disabled = true;
-    button.textContent = "SENDING...";
-    status.textContent = "";
-
-    try {
-      const data = await api(
-        "/api/withdrawals",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            amount_cents: Math.round(amount * 100),
-            payout_address: address
-          })
-        }
-      );
-
-      status.textContent =
-        `Withdrawal request #${data.withdrawal_id} submitted. Waiting for admin review.`;
-
-      form.reset();
-
-      await loadAccount();
-
-    } catch (error) {
-      status.textContent = error.message;
-
-    } finally {
-      button.disabled = false;
-      button.textContent = "REQUEST WITHDRAWAL";
-    }
-
+    document.getElementById("post-task-form").addEventListener("submit", submitTaskPost);
   });
 }
 
-// Security helpers
-function escapeHtml(value) {
-  return String(value ?? "").replace(
-    /[&<>"']/g,
-    ch => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    }[ch])
-  );
-}
-
-function safeUrl(value) {
+async function submitTaskPost(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const status = document.getElementById("post-task-status");
+  const txHash = document.getElementById("post-txhash").value.trim();
+  if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) { status.textContent = "Enter a valid TxHash (0x followed by 64 hexadecimal characters)."; return; }
+  button.disabled = true; button.textContent = "SENDING..."; status.textContent = "";
   try {
-    const url = new URL(value);
-
-    return ["https:", "http:"].includes(url.protocol)
-      ? escapeHtml(url.href)
-      : "#";
-
-  } catch {
-    return "#";
-  }
+    const result = await api("/api/task-post-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        title: document.getElementById("post-title").value.trim(),
+        description: document.getElementById("post-description").value.trim(),
+        target_url: document.getElementById("post-url").value.trim(),
+        tx_hash: txHash,
+        task_type: "manual"
+      })
+    });
+    status.textContent = `Request #${result.request_id} submitted. ${result.message}`;
+    form.reset();
+  } catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; button.textContent = "SEND TO ADMIN"; }
 }
 
-// Start application
+async function loadTasks() {
+  const holder = document.getElementById("task-results");
+  if (!holder) return;
+  try {
+    const data = await api("/api/tasks");
+    if (!data.tasks?.length) { holder.outerHTML = `<div id="task-results" class="empty-state">No tasks are available right now. Please check again later.</div>`; return; }
+    holder.outerHTML = `<div id="task-results" class="task-list">${data.tasks.map(task => {
+      const status = task.task_status || "available";
+      let action = "";
+      if (task.claimed) action = `<button class="primary-button" disabled>REWARD CLAIMED</button>`;
+      else if (status === "verified") action = `<button class="primary-button task-claim" data-task-id="${Number(task.id)}">CLAIM ${money(task.reward_cents)}</button>`;
+      else if (status === "pending") action = `<button class="primary-button" disabled>WAITING FOR REVIEW</button>`;
+      else if (status === "rejected") action = `<button class="primary-button" disabled>REJECTED · CONTACT SUPPORT</button>`;
+      else if (task.task_type === "telegram_join") action = `<button class="primary-button task-verify" data-task-id="${Number(task.id)}">VERIFY JOIN</button>`;
+      else action = `<button class="primary-button task-submit" data-task-id="${Number(task.id)}">SUBMIT FOR VERIFICATION</button>`;
+      const tag = task.claimed ? "REWARD CLAIMED" : status === "verified" ? "VERIFIED" : status === "pending" ? "PENDING" : status === "rejected" ? "REJECTED" : "AVAILABLE";
+      return `<article class="task-card"><div class="task-top"><span class="task-tag">${tag}</span><strong>+${money(task.reward_cents)}</strong></div><h3>${escapeHtml(task.title)}</h3><p>${escapeHtml(task.description || "Complete this task to earn a reward.")}</p><a class="task-open" href="${safeUrl(task.target_url)}" target="_blank" rel="noopener noreferrer">OPEN TASK ↗</a>${action}<small class="muted-note">Reward is credited only after verification and claiming.</small><p class="form-status task-status" aria-live="polite"></p></article>`;
+    }).join("")}</div>`;
+    content.querySelectorAll(".task-submit").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/complete")));
+    content.querySelectorAll(".task-verify").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/verify")));
+    content.querySelectorAll(".task-claim").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/claim")));
+  } catch (error) { holder.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`; }
+}
+
+async function submitTaskAction(button, path) {
+  const card = button.closest(".task-card");
+  const status = card.querySelector(".task-status");
+  const taskId = Number(button.dataset.taskId);
+  button.disabled = true; button.textContent = "PLEASE WAIT..."; status.textContent = "";
+  try {
+    const result = await api(path, { method: "POST", body: JSON.stringify({ task_id: taskId }) });
+    if (path === "/api/tasks/claim") {
+      status.textContent = `Reward ${money(result.reward_cents)} credited to your balance.`;
+      await loadAccount();
+    } else if (path === "/api/tasks/verify" && result.status === "verified") {
+      status.textContent = "Membership verified. Claim your reward.";
+    } else status.textContent = result.status === "verified" ? "Already verified. Claim your reward." : "Submitted. Waiting for admin verification.";
+    await loadTasks();
+  } catch (error) { button.disabled = false; button.textContent = path.endsWith("claim") ? "CLAIM REWARD" : path.endsWith("verify") ? "VERIFY JOIN" : "SUBMIT FOR VERIFICATION"; status.textContent = error.message; }
+}
+
+async function loadReferral() {
+  const holder = document.getElementById("referral-box");
+  if (!holder) return;
+  try {
+    const data = await api("/api/referral");
+    holder.innerHTML = `<div class="referral-count"><strong>${Number(data.verified_referrals || 0)}</strong><span>Verified referrals</span></div><label for="my-referral-link">Your personal referral link</label><div class="copy-row"><input id="my-referral-link" value="${escapeHtml(data.referral_link)}" readonly><button id="copy-referral" type="button" class="copy-button">COPY</button></div><p id="copy-status" class="form-status" aria-live="polite"></p>`;
+    document.getElementById("copy-referral").addEventListener("click", async () => {
+      const input = document.getElementById("my-referral-link");
+      try { await navigator.clipboard.writeText(input.value); }
+      catch { input.select(); document.execCommand("copy"); }
+      document.getElementById("copy-status").textContent = "Referral link copied!";
+    });
+  } catch (error) { holder.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`; }
+}
+
+function bindWithdrawal() {
+  const form = document.getElementById("withdraw-form");
+  if (!form) return;
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const status = document.getElementById("withdraw-status");
+    const button = form.querySelector('button[type="submit"]');
+    const amount = Number(document.getElementById("withdraw-amount").value);
+    const address = document.getElementById("withdraw-address").value.trim();
+    if (!Number.isFinite(amount) || amount < 3) { status.textContent = "Minimum withdrawal is $3.00."; return; }
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) { status.textContent = "Enter a valid BEP20 address starting with 0x."; return; }
+    button.disabled = true; button.textContent = "SENDING..."; status.textContent = "";
+    try {
+      const data = await api("/api/withdrawals", { method: "POST", body: JSON.stringify({ amount_cents: Math.round(amount * 100), payout_address: address }) });
+      status.textContent = `Withdrawal request #${data.withdrawal_id} submitted. Waiting for admin review.`;
+      form.reset(); await loadAccount();
+    } catch (error) { status.textContent = error.message; }
+    finally { button.disabled = false; button.textContent = "REQUEST WITHDRAWAL"; }
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+function safeUrl(value) {
+  try { const url = new URL(value); return ["https:", "http:"].includes(url.protocol) ? escapeHtml(url.href) : "#"; }
+  catch { return "#"; }
+}
+
 showPage("home");
 loadAccount();
