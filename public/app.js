@@ -11,7 +11,7 @@ const pages = {
   home: `<h2>Welcome to Earnora</h2><p>Your balance and earning activity will appear here.</p><div class="notice">Use the menu below to explore Tasks, Watch Ads, Referrals and Profile.</div>`,
   tasks: `<h2>📋 Available Tasks</h2><div class="loading">Loading tasks...</div>`,
   ads: `<h2>▶ Watch Ads</h2><p>Reward: <strong>$0.01</strong> per eligible completed ad.</p><div class="notice">Ads are not enabled yet. Rewards will only be credited after Monetag confirms a completed view.</div><button disabled class="disabled">ADS NOT CONFIGURED YET</button>`,
-  referral: `<h2>👥 Invite Friends</h2><p>Earn <strong>$0.10</strong> for each verified referral.</p><div id="referral-box" class="loading">Loading your referral link...</div><div class="notice">A referral is counted only after your invited friend completes their first eligible task. Self-referrals and duplicate rewards are blocked.</div>`,
+  referral: `<h2>👥 Invite Friends</h2><p>Earn <strong>$0.05</strong> for each verified referral.</p><div id="referral-box" class="loading">Loading your referral link...</div><div class="notice">A referral is counted only after your invited friend completes their first eligible task. Self-referrals and duplicate rewards are blocked.</div>`,
   profile: `<h2>👤 Profile</h2>
     <p>Manage your Earnora account and get official updates.</p>
     <div class="profile-links">
@@ -20,11 +20,11 @@ const pages = {
       <a class="profile-link payment-link" href="https://t.me/flash_bot_pay" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">🧾</span><span class="profile-link-copy"><strong>Payment Channel</strong><small>@flash_bot_pay · Payment proofs</small></span><span class="profile-link-action">VIEW ↗</span></a>
     </div>
     <h3>💸 Withdraw Funds</h3>
-    <div class="withdraw-summary"><span>Minimum withdrawal</span><strong>$1.00</strong></div>
+    <div class="withdraw-summary"><span>Minimum withdrawal</span><strong>$3.00</strong></div>
     <div class="withdraw-summary"><span>Verified referrals required</span><strong>5</strong></div>
     <div class="notice">Only Trust Wallet BEP20 addresses are accepted. Other wallets and networks are not supported. Never enter your recovery phrase or private key.</div>
     <form id="withdraw-form" class="withdraw-form">
-      <label for="withdraw-amount">Amount (USD)</label><input id="withdraw-amount" name="amount" type="number" min="1" step="0.01" placeholder="1.00" required>
+      <label for="withdraw-amount">Amount (USD)</label><input id="withdraw-amount" name="amount" type="number" min="3" step="0.01" placeholder="3.00" required>
       <label for="withdraw-address">Trust Wallet BEP20 address</label><input id="withdraw-address" name="address" type="text" placeholder="0x..." minlength="42" maxlength="42" required>
       <button type="submit" class="primary-button">REQUEST WITHDRAWAL</button>
       <p id="withdraw-status" class="form-status" aria-live="polite"></p>
@@ -104,7 +104,7 @@ function bindWithdrawal() {
     const button = form.querySelector('button[type="submit"]');
     const amount = Number(document.getElementById('withdraw-amount').value);
     const address = document.getElementById('withdraw-address').value.trim();
-    if (!Number.isFinite(amount) || amount < 1) { status.textContent = 'Minimum withdrawal is $1.00.'; return; }
+    if (!Number.isFinite(amount) || amount < 3) { status.textContent = 'Minimum withdrawal is $3.00.'; return; }
     if (!/^0x[a-fA-F0-9]{40}$/.test(address)) { status.textContent = 'Enter a valid BEP20 address starting with 0x.'; return; }
     button.disabled = true; button.textContent = 'SENDING...'; status.textContent = '';
     try {
