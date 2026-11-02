@@ -300,7 +300,7 @@ async function handleApi(request, env, url, auth) {
       const targetUrl = String(body?.target_url || "").trim();
       const taskType = String(body?.task_type || "manual");
       const chatId = body?.chat_id ? String(body.chat_id).trim() : null;
-      if (!title || !targetUrl || !/^https?:\\/\\//i.test(targetUrl))
+      if (!title || !targetUrl || !/^https?:\/\//i.test(targetUrl))
         return json({ error: "Enter a task title and valid task URL" }, 400);
       if (!["manual", "telegram_join"].includes(taskType)) return json({ error: "Invalid task type" }, 400);
       if (taskType === "telegram_join" && !chatId)
