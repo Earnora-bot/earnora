@@ -348,6 +348,21 @@ async function handleApi(request, env, url, auth) {
   const path = url.pathname;
 
   if (path === "/api/me" && request.method === "GET") {
+      if (path === "/api/monetag/claim" && request.method === "POST") {
+    const body = await request.json().catch(() => null);
+    const ymid = String(body?.ymid || "");
+
+    if (!/^[A-Za-z0-9._-]{8,128}$/.test(ymid)) {
+      return json({ error: "Invalid ad reference." }, 400);
+    }
+
+    const result = await claimMonetagAd(db, uid, ymid);
+
+    return result.error
+      ? json({ error: result.error }, result.status)
+      : json(result);
+      }
+    
     const account = await db.prepare(`SELECT telegram_id, username, first_name, balance_cents
       FROM users WHERE telegram_id = ?`).bind(uid).first();
     return json({ user: account });
