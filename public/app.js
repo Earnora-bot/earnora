@@ -23,9 +23,19 @@ const pages = {
     <div id="post-task-area"></div>
     <div id="task-results" class="loading">Loading tasks...</div>`,
   ads: `<h2>▶ Watch Ads</h2>
-    <p>Reward: <strong>$0.01</strong> per eligible completed ad.</p>
-    <div class="notice">Ads are not enabled yet. Rewards will only be credited after Monetag confirms a completed view.</div>
-    <button disabled class="disabled">ADS NOT CONFIGURED YET</button>`,
+    <p>Reward: <strong>$0.01</strong> per Monetag-confirmed valued impression.</p>
+    <div class="notice">Maximum 100 ad attempts per day. Rewards are credited only after Monetag's server confirms a valued impression.</div>
+    <button id="watch-ad" class="primary-button">WATCH AD · EARN $0.01</button>
+    <p id="ad-status" class="form-status" aria-live="polite"></p>
+    <div id="ad-claim-area"></div>`,
+  support: `<h2>🎧 Earnora Help Center</h2>
+    <p>Send a message directly to Earnora support.</p>
+    <form id="support-form" class="withdraw-form">
+      <label for="support-message">Your message</label>
+      <textarea id="support-message" rows="5" maxlength="2000" required placeholder="Describe how we can help (5–2000 characters)"></textarea>
+      <button type="submit" class="primary-button">SEND MESSAGE</button>
+      <p id="support-status" class="form-status" aria-live="polite"></p>
+    </form>` ,
   referral: `<h2>👥 Invite Friends</h2>
     <p>Earn <strong>$0.05</strong> for each verified referral.</p>
     <div id="referral-box" class="loading">Loading your referral link...</div>
@@ -34,7 +44,7 @@ const pages = {
     <p>Manage your Earnora account and get official updates.</p>
     <div class="profile-links">
       <a class="profile-link official-link" href="https://t.me/flash_bot_update" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">📣</span><span class="profile-link-copy"><strong>Official Channel</strong><small>@flash_bot_update</small></span><span class="profile-link-action">OPEN ↗</span></a>
-      <a class="profile-link help-link" href="https://t.me/owner_TaskPay" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">🎧</span><span class="profile-link-copy"><strong>Help Center</strong><small>Contact Earnora Support</small></span><span class="profile-link-action">HELP ↗</span></a>
+      <a class="profile-link help-link" href="#support" id="open-support"><span class="profile-link-icon">🎧</span><span class="profile-link-copy"><strong>Help Center</strong><small>Contact Earnora Support</small></span><span class="profile-link-action">HELP ↗</span></a>
       <a class="profile-link payment-link" href="https://t.me/flash_bot_pay" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">🧾</span><span class="profile-link-copy"><strong>Payment Channel</strong><small>@flash_bot_pay · Payment proofs</small></span><span class="profile-link-action">VIEW ↗</span></a>
     </div>
     <h3>💸 Withdraw Funds</h3>
@@ -55,7 +65,13 @@ function showPage(page) {
   document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.page === page));
   if (page === "tasks") { bindTaskPosting(); loadTasks(); }
   if (page === "referral") loadReferral();
-  if (page === "profile") bindWithdrawal();
+  if (page === "ads") bindWatchAds();
+  if (page === "profile") {
+    bindWithdrawal();
+    const help = document.getElementById("open-support");
+    help?.addEventListener("click", event => { event.preventDefault(); showPage("support"); });
+  }
+  if (page === "support") bindSupportForm();
 }
 document.querySelectorAll(".nav-item").forEach(el => el.addEventListener("click", () => showPage(el.dataset.page)));
 
@@ -192,6 +208,121 @@ async function submitTaskAction(button, path) {
     } else status.textContent = result.status === "verified" ? "Already verified. Claim your reward." : "Submitted. Waiting for admin verification.";
     await loadTasks();
   } catch (error) { button.disabled = false; button.textContent = path.endsWith("claim") ? "CLAIM REWARD" : path.endsWith("verify") ? "VERIFY JOIN" : "SUBMIT FOR VERIFICATION"; status.textContent = error.message; }
+}
+
+async function bindSupportForm() {
+  const form = document.getElementById("support-form");
+  if (!form) return;
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    const status = document.getElementById("support-status");
+    const message = document.getElementById("support-message").value.trim();
+    button.disabled = true;
+    button.textContent = "SENDING...";
+    status.textContent = "";
+    try {
+      const result = await api("/api/support", { method: "POST", body: JSON.stringify({ message }) });
+      status.textContent = `${result.message} Reference #${result.support_id || "saved"}.`;
+      form.reset();
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = "SEND MESSAGE";
+    }
+  });
+}
+
+function bindWatchAds() {
+  const button = document.getElementById("watch-ad");
+  if (!button) return;
+  button.addEventListener("click", startWatchAd);
+}
+
+async function startWatchAd() {
+  const button = document.getElementById("watch-ad");
+  const status = document.getElementById("ad-status");
+  const claimArea = document.getElementById("ad-claim-area");
+  if (!button || !status) return;
+  const showAd = window["show_12181637"];
+  if (typeof showAd !== "function") {
+    status.textContent = "Monetag is still loading. Please wait a moment and try again.";
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "PREPARING AD...";
+  status.textContent = "";
+  claimArea.innerHTML = "";
+  let ymid = "";
+  try {
+    const started = await api("/api/monetag/start", { method: "POST", body: "{}" });
+    ymid = started.ymid;
+    button.textContent = "AD IN PROGRESS...";
+    const result = await showAd({ type: "end", ymid, requestVar: "watch_ads" });
+    if (result?.reward_event_type === "non_valued") {
+      status.textContent = "Monetag marked this ad as non-valued. No reward is available.";
+    } else {
+      status.textContent = "Ad finished. Waiting for Monetag's server confirmation...";
+      await pollMonetagStatus(ymid, 15);
+    }
+  } catch (error) {
+    status.textContent = error.message || "The ad could not be completed. No reward has been added.";
+    if (ymid) {
+      claimArea.innerHTML = `<button id="check-ad-status" class="copy-button" type="button">CHECK REWARD STATUS</button>`;
+      document.getElementById("check-ad-status")?.addEventListener("click", () => pollMonetagStatus(ymid, 5));
+    }
+  } finally {
+    button.disabled = false;
+    button.textContent = "WATCH AD · EARN $0.01";
+  }
+}
+
+async function pollMonetagStatus(ymid, attempts) {
+  const status = document.getElementById("ad-status");
+  const claimArea = document.getElementById("ad-claim-area");
+  if (!status || !claimArea) return;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const result = await api(`/api/monetag/status?ymid=${encodeURIComponent(ymid)}`);
+      if (result.status === "verified") {
+        status.textContent = "Monetag confirmed your valued ad view. Claim your $0.01 reward below.";
+        claimArea.innerHTML = `<button id="claim-ad" class="primary-button">CLAIM REWARD · $0.01</button>`;
+        document.getElementById("claim-ad")?.addEventListener("click", () => claimMonetagReward(ymid));
+        return;
+      }
+      if (result.status === "rejected") {
+        status.textContent = "This ad was not valued by Monetag. No reward is available.";
+        claimArea.innerHTML = "";
+        return;
+      }
+    } catch (error) {
+      status.textContent = error.message;
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  status.textContent = "Confirmation is still pending. You can check again shortly.";
+  claimArea.innerHTML = `<button id="check-ad-status" class="copy-button" type="button">CHECK REWARD STATUS</button>`;
+  document.getElementById("check-ad-status")?.addEventListener("click", () => pollMonetagStatus(ymid, 10));
+}
+
+async function claimMonetagReward(ymid) {
+  const button = document.getElementById("claim-ad");
+  const status = document.getElementById("ad-status");
+  if (button) { button.disabled = true; button.textContent = "CLAIMING..."; }
+  try {
+    const result = await api("/api/monetag/claim", {
+      method: "POST", body: JSON.stringify({ ymid })
+    });
+    status.textContent = `Your ${money(result.reward_cents)} ad reward has been credited.`;
+    document.getElementById("ad-claim-area").innerHTML = "";
+    await loadAccount();
+  } catch (error) {
+    status.textContent = error.message;
+    if (button) { button.disabled = false; button.textContent = "CLAIM REWARD · $0.01"; }
+  }
 }
 
 async function loadReferral() {
