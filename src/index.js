@@ -5,6 +5,9 @@ const MIN_WITHDRAWAL_CENTS = 300;
 const REQUIRED_REFERRALS = 5;
 const TASK_POST_FEE_CENTS = 100;
 const TASK_POST_WALLET = "0x52824938de138886fdf6f7a80262e5c0a173d92c";
+const MONETAG_ZONE_ID = "12181637";
+const MONETAG_AD_REWARD_CENTS = 1;
+const MONETAG_DAILY_LIMIT = 100;
 
 const json = (data, status = 200) =>
   Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
@@ -292,54 +295,109 @@ async function claimTask(db, uid, taskId) {
   return { ok: true, reward_cents: completion.reward_cents };
 }
 
+async function startMonetagAd(db, uid) {
+  const ymid = crypto.randomUUID().replace(/-/g, "");
+  const inserted = await db.prepare(`
+    INSERT INTO ad_events (telegram_id, provider_event_id, reward_cents, status)
+    SELECT ?, ?, ?, 'pending'
+    WHERE (
+      SELECT COUNT(*) FROM ad_events
+      WHERE telegram_id = ? AND date(created_at) = date('now')
+    ) < ?
+  `).bind(uid, ymid, MONETAG_AD_REWARD_CENTS, uid, MONETAG_DAILY_LIMIT).run();
+
+  if (!inserted.meta?.changes) {
+    return { error: "You have reached today's 100-ad limit. Please try again tomorrow.", status: 429 };
+  }
+  const usage = await db.prepare(`
+    SELECT COUNT(*) AS used FROM ad_events
+    WHERE telegram_id = ? AND date(created_at) = date('now')
+  `).bind(uid).first();
+  return { ok: true, ymid, reward_cents: MONETAG_AD_REWARD_CENTS,
+    daily_limit: MONETAG_DAILY_LIMIT, ads_used_today: usage?.used || 0 };
+}
+
+async function monetagAdStatus(db, uid, ymid) {
+  const event = await db.prepare(`
+    SELECT reward_cents, status, claimed_at FROM ad_events
+    WHERE provider_event_id = ? AND telegram_id = ?
+  `).bind(ymid, uid).first();
+  if (!event) return { error: "Ad session not found.", status: 404 };
+  return { ok: true, status: event.status, claimed: !!event.claimed_at,
+    reward_cents: event.reward_cents };
+}
+
 async function claimMonetagAd(db, uid, ymid) {
   const event = await db.prepare(`
-    SELECT id, reward_cents, status
-    FROM ad_events
-    WHERE provider_event_id = ?
-      AND telegram_id = ?
+    SELECT id, reward_cents, status, claimed_at
+    FROM ad_events WHERE provider_event_id = ? AND telegram_id = ?
   `).bind(ymid, uid).first();
-
-  if (!event) {
-    return { error: "Ad reward not found.", status: 404 };
-  }
-
-  if (!["verified", "claimed"].includes(event.status)) {
-    return { error: "Ad reward is not verified yet.", status: 409 };
+  if (!event) return { error: "Ad reward not found.", status: 404 };
+  if (event.status !== "verified") {
+    return { error: event.status === "rejected" ? "Monetag did not approve this ad view." : "Ad reward is not verified yet.", status: 409 };
   }
 
   await db.batch([
-    db.prepare(`
-      UPDATE ad_events
-      SET status = 'claimed'
-      WHERE id = ?
-        AND telegram_id = ?
-        AND status = 'verified'
-    `).bind(event.id, uid),
-
-    db.prepare(`
-      INSERT OR IGNORE INTO ledger
-        (telegram_id, amount_cents, reason, reference_id)
-      SELECT telegram_id, reward_cents, 'monetag_ad',
-        'monetag:' || id
-      FROM ad_events
-      WHERE id = ?
-        AND telegram_id = ?
-        AND status = 'claimed'
-    `).bind(event.id, uid)
+    db.prepare(`UPDATE ad_events SET claimed_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND telegram_id = ? AND status = 'verified' AND claimed_at IS NULL`)
+      .bind(event.id, uid),
+    db.prepare(`INSERT OR IGNORE INTO ledger
+      (telegram_id, amount_cents, reason, reference_id)
+      SELECT telegram_id, reward_cents, 'monetag_ad', 'monetag:' || id
+      FROM ad_events WHERE id = ? AND telegram_id = ?
+        AND status = 'verified' AND claimed_at IS NOT NULL`)
+      .bind(event.id, uid)
   ]);
 
-  const credited = await db.prepare(`
-    SELECT id FROM ledger
-    WHERE reference_id = ?
-      AND telegram_id = ?
-  `).bind(`monetag:${event.id}`, uid).first();
+  const credited = await db.prepare(`SELECT id FROM ledger
+    WHERE reference_id = ? AND telegram_id = ?`)
+    .bind(`monetag:${event.id}`, uid).first();
+  if (!credited) return { error: "Could not claim reward. Please try again.", status: 500 };
+  return { ok: true, reward_cents: event.reward_cents, already_claimed: !!event.claimed_at };
+}
 
-  if (!credited) {
-    return { error: "Could not claim reward.", status: 500 };
+async function handleMonetagPostback(request, env, url) {
+  const secret = url.searchParams.get("secret") || "";
+  if (!env.MONETAG_POSTBACK_SECRET ||
+      secret.length !== env.MONETAG_POSTBACK_SECRET.length ||
+      !crypto.subtle) return json({ error: "Forbidden" }, 403);
+
+  // Constant-time comparison avoids leaking secret-prefix information.
+  const encoder = new TextEncoder();
+  const a = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
+  const b = await crypto.subtle.digest("SHA-256", encoder.encode(env.MONETAG_POSTBACK_SECRET));
+  const aa = new Uint8Array(a), bb = new Uint8Array(b);
+  let mismatch = 0;
+  for (let i = 0; i < aa.length; i++) mismatch |= aa[i] ^ bb[i];
+  if (mismatch) return json({ error: "Forbidden" }, 403);
+
+  const ymid = url.searchParams.get("ymid") || "";
+  const eventType = url.searchParams.get("event_type") || "";
+  const rewardType = url.searchParams.get("reward_event_type") || "";
+  const zoneId = url.searchParams.get("zone_id") || "";
+  const telegramId = url.searchParams.get("telegram_id") || "";
+  if (!/^[A-Za-z0-9._-]{8,128}$/.test(ymid)) return json({ error: "Invalid ymid" }, 400);
+  if (zoneId !== MONETAG_ZONE_ID) return json({ error: "Invalid zone" }, 400);
+
+  // Only a valued impression is eligible. Click postbacks must never pay twice.
+  if (eventType !== "impression") return json({ ok: true, ignored: true });
+  const db = env.DB;
+  const event = await db.prepare(`SELECT id, telegram_id, status FROM ad_events
+    WHERE provider_event_id = ?`).bind(ymid).first();
+  if (!event) return json({ error: "Unknown ad session" }, 404);
+  if (telegramId && telegramId !== event.telegram_id) return json({ error: "User mismatch" }, 403);
+  if (event.status !== "pending") return json({ ok: true, duplicate: true });
+
+  if (rewardType === "valued") {
+    await db.prepare(`UPDATE ad_events SET status = 'verified'
+      WHERE id = ? AND status = 'pending'`).bind(event.id).run();
+  } else if (rewardType === "non_valued") {
+    await db.prepare(`UPDATE ad_events SET status = 'rejected'
+      WHERE id = ? AND status = 'pending'`).bind(event.id).run();
+  } else {
+    return json({ error: "Invalid reward event type" }, 400);
   }
-
-  return { ok: true, reward_cents: event.reward_cents };
+  return json({ ok: true });
 }
 
 async function handleApi(request, env, url, auth) {
@@ -347,23 +405,45 @@ async function handleApi(request, env, url, auth) {
   const db = env.DB;
   const path = url.pathname;
 
-  if (path === "/api/me" && request.method === "GET") {
-    
-      if (path === "/api/monetag/claim" && request.method === "POST") {
+  if (path === "/api/monetag/start" && request.method === "POST") {
+    const result = await startMonetagAd(db, uid);
+    return result.error ? json({ error: result.error }, result.status) : json(result, 201);
+  }
+
+  if (path === "/api/monetag/status" && request.method === "GET") {
+    const ymid = url.searchParams.get("ymid") || "";
+    if (!/^[A-Za-z0-9._-]{8,128}$/.test(ymid)) return json({ error: "Invalid ad reference." }, 400);
+    const result = await monetagAdStatus(db, uid, ymid);
+    return result.error ? json({ error: result.error }, result.status) : json(result);
+  }
+
+  if (path === "/api/monetag/claim" && request.method === "POST") {
     const body = await request.json().catch(() => null);
     const ymid = String(body?.ymid || "");
-
-    if (!/^[A-Za-z0-9._-]{8,128}$/.test(ymid)) {
-      return json({ error: "Invalid ad reference." }, 400);
-    }
-
+    if (!/^[A-Za-z0-9._-]{8,128}$/.test(ymid)) return json({ error: "Invalid ad reference." }, 400);
     const result = await claimMonetagAd(db, uid, ymid);
+    return result.error ? json({ error: result.error }, result.status) : json(result);
+  }
 
-    return result.error
-      ? json({ error: result.error }, result.status)
-      : json(result);
-      }
-    
+  if (path === "/api/support" && request.method === "POST") {
+    const body = await request.json().catch(() => null);
+    const message = String(body?.message || "").trim();
+    if (message.length < 5 || message.length > 2000) {
+      return json({ error: "Please enter a message between 5 and 2000 characters." }, 400);
+    }
+    const saved = await db.prepare(`INSERT INTO support_messages (telegram_id, message)
+      VALUES (?, ?)`).bind(uid, message).run();
+    const supportId = saved.meta?.last_row_id || null;
+    try {
+      await telegramSend(env, ADMIN_ID,
+        `🎧 EARNORA SUPPORT MESSAGE #${supportId || "new"}\\n\\nUser ID: ${uid}\\n\\n${message}`);
+    } catch (error) {
+      console.error("Support notification failed:", error.message);
+    }
+    return json({ ok: true, support_id: supportId, message: "Your message has been sent to Earnora support." }, 201);
+  }
+
+  if (path === "/api/me" && request.method === "GET") {
     const account = await db.prepare(`SELECT telegram_id, username, first_name, balance_cents
       FROM users WHERE telegram_id = ?`).bind(uid).first();
     return json({ user: account });
@@ -594,6 +674,14 @@ export default {
       }
     }
     if (url.pathname === "/api/health") return json({ status: "ok", app: "Earnora" });
+    if (url.pathname === "/monetag/postback" && request.method === "GET") {
+      if (!env.DB) return json({ error: "Database unavailable" }, 503);
+      try { return await handleMonetagPostback(request, env, url); }
+      catch (error) {
+        console.error("Monetag postback failed:", error.message);
+        return json({ error: "Postback processing failed" }, 500);
+      }
+    }
     if (url.pathname.startsWith("/api/")) {
       if (!["GET", "POST"].includes(request.method)) return json({ error: "Method not allowed" }, 405);
       if (!env.DB || !env.BOT_TOKEN) return json({ error: "Worker configuration missing" }, 500);
