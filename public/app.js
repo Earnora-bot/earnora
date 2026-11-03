@@ -1,3 +1,4 @@
+
 const tg = window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
@@ -94,7 +95,7 @@ function bindTaskPosting() {
         <label>Payment network</label><input value="BNB Smart Chain · USDT BEP20 · $1.00" readonly>
         <label>Send USDT to this wallet</label>
         <div class="wallet-copy-row"><input id="post-wallet" value="${TASK_POST_WALLET}" readonly><button id="copy-post-wallet" type="button" class="copy-button">COPY</button></div>
-        <label for="post-txhash">Transaction Hash (TxHash)</label><input id="post-txhash" required placeholder="0x + 64 characters" autocomplete="off">
+        <label for="post-txhash">Transaction Hash (TxHash)</label><input id="post-txhash" required placeholder="Paste your TxHash (with or without 0x)" autocomplete="off" spellcheck="false">
         <button type="submit" class="primary-button">SEND TO ADMIN</button>
         <p id="post-task-status" class="form-status" aria-live="polite"></p>
         <p class="muted-note">Do not send funds on another network or token. Never share your wallet recovery phrase or private key. Payment is subject to manual verification.</p>
@@ -113,9 +114,24 @@ async function submitTaskPost(event) {
   const form = event.currentTarget;
   const button = form.querySelector('button[type="submit"]');
   const status = document.getElementById("post-task-status");
-  const txHash = document.getElementById("post-txhash").value.trim();
-  if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) { status.textContent = "Enter a valid TxHash (0x followed by 64 hexadecimal characters)."; return; }
-  button.disabled = true; button.textContent = "SENDING..."; status.textContent = "";
+
+  // Accept a TxHash with or without the 0x prefix.
+  const enteredHash = document.getElementById("post-txhash").value.trim();
+  const cleanHash = enteredHash.replace(/^0x/i, "");
+
+  // A standard transaction hash contains exactly 64 hexadecimal characters.
+  if (!/^[a-fA-F0-9]{64}$/.test(cleanHash)) {
+    status.textContent = "Enter a valid transaction hash containing 64 hexadecimal characters. You may include or omit 0x.";
+    return;
+  }
+
+  // Add 0x automatically if the user entered the hash without it.
+  const txHash = "0x" + cleanHash;
+
+  button.disabled = true;
+  button.textContent = "SENDING...";
+  status.textContent = "";
+
   try {
     const result = await api("/api/task-post-requests", {
       method: "POST",
@@ -129,8 +145,12 @@ async function submitTaskPost(event) {
     });
     status.textContent = `Request #${result.request_id} submitted. ${result.message}`;
     form.reset();
-  } catch (error) { status.textContent = error.message; }
-  finally { button.disabled = false; button.textContent = "SEND TO ADMIN"; }
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "SEND TO ADMIN";
+  }
 }
 
 async function loadTasks() {
