@@ -450,14 +450,24 @@ async function handleApi(request, env, url, auth) {
   }
 
   if (path === "/api/tasks" && request.method === "GET") {
-    const result = await db.prepare(`SELECT t.id, t.title, t.description, t.reward_cents,
-      t.target_url, t.task_type, COALESCE(c.status, 'available') AS task_status,
-      CASE WHEN c.status = 'verified' THEN 1 ELSE 0 END AS completed,
-      CASE WHEN c.claimed_at IS NOT NULL THEN 1 ELSE 0 END AS claimed
-      FROM tasks t LEFT JOIN task_completions c
-      ON c.task_id = t.id AND c.telegram_id = ?
-      WHERE t.active = 1 ORDER BY t.id DESC`).bind(uid).all();
-    return json({ tasks: result.results || [] });
+    // Keep unclaimed work in Available Tasks; claimed work is returned separately.
+    // The completion history remains visible even if an admin later deactivates a task.
+    const [available, completed] = await Promise.all([
+      db.prepare(`SELECT t.id, t.title, t.description, t.reward_cents,
+        t.target_url, t.task_type, COALESCE(c.status, 'available') AS task_status,
+        CASE WHEN c.status = 'verified' THEN 1 ELSE 0 END AS completed,
+        CASE WHEN c.claimed_at IS NOT NULL THEN 1 ELSE 0 END AS claimed
+        FROM tasks t LEFT JOIN task_completions c
+        ON c.task_id = t.id AND c.telegram_id = ?
+        WHERE t.active = 1 AND (c.claimed_at IS NULL)
+        ORDER BY t.id DESC`).bind(uid).all(),
+      db.prepare(`SELECT t.id, t.title, t.description, t.reward_cents,
+        c.claimed_at, c.verified_at
+        FROM task_completions c JOIN tasks t ON t.id = c.task_id
+        WHERE c.telegram_id = ? AND c.claimed_at IS NOT NULL
+        ORDER BY c.claimed_at DESC, c.id DESC`).bind(uid).all()
+    ]);
+    return json({ tasks: available.results || [], completed_tasks: completed.results || [] });
   }
 
   // Submit a paid task-posting request. TxHash is recorded for manual admin verification only.
@@ -551,10 +561,18 @@ async function handleApi(request, env, url, auth) {
   }
 
   if (path === "/api/referral" && request.method === "GET") {
-    const row = await db.prepare(`SELECT COUNT(*) AS total FROM referrals
-      WHERE inviter_id = ? AND rewarded = 1`).bind(uid).first();
+    const [row, referrals] = await Promise.all([
+      db.prepare(`SELECT COUNT(*) AS total FROM referrals
+        WHERE inviter_id = ? AND rewarded = 1`).bind(uid).first(),
+      db.prepare(`SELECT r.invitee_id, r.status, r.rewarded, r.created_at,
+        u.first_name, u.username
+        FROM referrals r LEFT JOIN users u ON u.telegram_id = r.invitee_id
+        WHERE r.inviter_id = ?
+        ORDER BY r.created_at DESC, r.id DESC`).bind(uid).all()
+    ]);
     return json({
       verified_referrals: row?.total || 0,
+      referrals: referrals.results || [],
       referral_link: `https://t.me/earnorav2_bot?start=ref_${uid}`,
       reward_per_referral_cents: REFERRAL_REWARD_CENTS
     });
