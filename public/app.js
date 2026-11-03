@@ -15,17 +15,22 @@ const headers = () => ({
 });
 
 const pages = {
-  home: `<h2>Welcome to Earnora</h2>
-    <p>Your balance and earning activity will appear here.</p>
-    <div class="notice">Use the menu below to explore Tasks, Watch Ads, Referrals and Profile.</div>`,
+  home: `<div class="home-heading"><p class="eyebrow">YOUR REWARDS HUB</p><h2>Welcome to Earnora ✨</h2><p>Your earning journey starts here.</p></div>
+    <div class="dashboard-grid">
+      <button class="dashboard-tile" type="button" data-go-page="tasks"><span>📋</span><strong>DAILY TASKS</strong><small>Complete & earn</small></button>
+      <button class="dashboard-tile" type="button" data-go-page="ads"><span>▶️</span><strong>WATCH ADS</strong><small>Earn $0.01 per valued ad</small></button>
+      <button class="dashboard-tile" type="button" data-go-page="referral"><span>👥</span><strong>INVITE FRIENDS</strong><small>Earn referral rewards</small></button>
+      <button class="dashboard-tile" type="button" data-go-page="profile"><span>👑</span><strong>MY PROFILE</strong><small>Account & withdrawals</small></button>
+    </div>
+    <div class="notice">✨ Your balance is updated from your verified Earnora account. Rewards are never estimated or animated as fake earnings.</div>`,
   tasks: `<h2>📋 Available Tasks</h2>
     <button id="show-post-task" class="post-task-toggle" type="button">＋ POST A TASK <span>$1.00 USDT</span></button>
     <div id="post-task-area"></div>
     <div id="task-results" class="loading">Loading tasks...</div>`,
-  ads: `<h2>▶ Watch Ads</h2>
-    <p>Reward: <strong>$0.01</strong> per Monetag-confirmed valued impression.</p>
-    <div class="notice">Maximum 100 ad attempts per day. Rewards are credited only after Monetag's server confirms a valued impression.</div>
-    <button id="watch-ad" class="primary-button">WATCH AD · EARN $0.01</button>
+  ads: `<h2>✨ Earn with Ads</h2>
+    <div class="ads-hero"><div class="ads-coin">🪙</div><strong>WATCH & EARN</strong><small>Get $0.01 for each Monetag-confirmed valued impression</small></div>
+    <div class="notice">Daily limit: 100 ad attempts. Your reward becomes available only after Monetag confirms a valued impression on the server.</div>
+    <button id="watch-ad" class="primary-button">▶ WATCH AD · EARN $0.01</button>
     <p id="ad-status" class="form-status" aria-live="polite"></p>
     <div id="ad-claim-area"></div>`,
   support: `<h2>🎧 Earnora Help Center</h2>
@@ -62,6 +67,8 @@ const pages = {
 
 function showPage(page) {
   content.innerHTML = pages[page] || pages.home;
+  content.querySelectorAll("[data-go-page]").forEach(button =>
+    button.addEventListener("click", () => showPage(button.dataset.goPage)));
   document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.page === page));
   if (page === "tasks") { bindTaskPosting(); loadTasks(); }
   if (page === "referral") loadReferral();
@@ -82,17 +89,44 @@ async function api(path, options = {}) {
   return data;
 }
 
-async function loadAccount() {
-  if (!tg?.initData) {
-    welcome.textContent = "Open this Mini App inside Telegram to sign in.";
-    content.innerHTML = `<h2>Open Earnora in Telegram</h2><p>Your Telegram account is required to load a real balance.</p><div class="notice">This preview does not create or credit a wallet balance.</div>`;
-    return;
+function animateBalance(targetCents) {
+  const from = Number(balance.dataset.cents || 0);
+  const to = Number(targetCents || 0);
+  balance.dataset.cents = String(to);
+  const started = performance.now();
+  const duration = 850;
+  const tick = now => {
+    const progress = Math.min(1, (now - started) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    balance.textContent = money(Math.round(from + (to - from) * eased));
+    if (progress < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+function hideSplash() {
+  const splash = document.getElementById("splash-screen");
+  if (splash) {
+    splash.classList.add("hide");
+    setTimeout(() => splash.remove(), 650);
   }
+}
+
+async function loadAccount() {
   try {
+    if (!tg?.initData) {
+      welcome.textContent = "Open this Mini App inside Telegram to sign in.";
+      content.innerHTML = `<h2>Open Earnora in Telegram</h2><p>Your Telegram account is required to load a real balance.</p><div class="notice">This preview does not create or credit a wallet balance.</div>`;
+      return;
+    }
     const data = await api("/api/me");
-    balance.textContent = money(data.user.balance_cents);
+    animateBalance(data.user.balance_cents);
     welcome.textContent = `Welcome, ${data.user.first_name || "Earnora user"}`;
-  } catch { welcome.textContent = "Unable to load account. Please try again."; }
+  } catch {
+    welcome.textContent = "Unable to load account. Please try again.";
+  } finally {
+    hideSplash();
+  }
 }
 
 function bindTaskPosting() {
