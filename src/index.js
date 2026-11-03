@@ -348,6 +348,7 @@ async function handleApi(request, env, url, auth) {
   const path = url.pathname;
 
   if (path === "/api/me" && request.method === "GET") {
+    
       if (path === "/api/monetag/claim" && request.method === "POST") {
     const body = await request.json().catch(() => null);
     const ymid = String(body?.ymid || "");
