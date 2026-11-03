@@ -1,4 +1,3 @@
-
 const tg = window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
@@ -7,6 +6,7 @@ const content = document.getElementById("content");
 const balance = document.getElementById("balance");
 const welcome = document.getElementById("welcome");
 const TASK_POST_WALLET = "0x52824938de138886fdf6f7a80262e5c0a173d92c";
+let isAdmin = false;
 
 const money = cents => `$${(Number(cents || 0) / 100).toFixed(2)}`;
 const headers = () => ({
@@ -15,18 +15,23 @@ const headers = () => ({
 });
 
 const pages = {
-  home: `<h2>Welcome to Earnora</h2>
-    <p>Your balance and earning activity will appear here.</p>
-    <div class="notice">Use the menu below to explore Tasks, Watch Ads, Referrals and Profile.</div>`,
-  tasks: `<h2>📋 Tasks</h2>
+  home: `<div class="home-heading"><p class="eyebrow">YOUR REWARDS HUB</p><h2>Welcome to Earnora ✨</h2><p>Your earning journey starts here.</p></div>
+    <div class="dashboard-grid">
+      <button class="dashboard-tile" type="button" data-go-page="tasks"><span>📋</span><strong>DAILY TASKS</strong><small>Complete & earn</small></button>
+      <button class="dashboard-tile" type="button" data-go-page="ads"><span>▶️</span><strong>WATCH ADS</strong><small>Earn $0.01 per valued ad</small></button>
+      <button class="dashboard-tile" type="button" data-go-page="referral"><span>👥</span><strong>INVITE FRIENDS</strong><small>Earn referral rewards</small></button>
+      <button class="dashboard-tile" type="button" data-go-page="profile"><span>👑</span><strong>MY PROFILE</strong><small>Account & withdrawals</small></button>
+    </div>
+    <div class="notice">✨ Your balance is updated from your verified Earnora account. Rewards are never estimated or animated as fake earnings.</div>`,
+  tasks: `<h2>📋 Available Tasks</h2>
+    <div id="admin-task-panel"></div>
     <button id="show-post-task" class="post-task-toggle" type="button">＋ POST A TASK <span>$1.00 USDT</span></button>
     <div id="post-task-area"></div>
-    <div class="task-tabs"><button type="button" class="task-tab active" data-task-tab="available">AVAILABLE TASKS</button><button type="button" class="task-tab" data-task-tab="completed">COMPLETED TASKS</button></div>
     <div id="task-results" class="loading">Loading tasks...</div>`,
-  ads: `<h2>▶ Watch Ads</h2>
-    <p>Reward: <strong>$0.01</strong> per Monetag-confirmed valued impression.</p>
-    <div class="notice">Maximum 100 ad attempts per day. Rewards are credited only after Monetag's server confirms a valued impression.</div>
-    <button id="watch-ad" class="primary-button">WATCH AD · EARN $0.01</button>
+  ads: `<h2>✨ Earn with Ads</h2>
+    <div class="ads-hero"><div class="ads-coin">🪙</div><strong>WATCH & EARN</strong><small>Get $0.01 for each Monetag-confirmed valued impression</small></div>
+    <div class="notice">Daily limit: 100 ad attempts. Your reward becomes available only after Monetag confirms a valued impression on the server.</div>
+    <button id="watch-ad" class="primary-button">▶ WATCH AD · EARN $0.01</button>
     <p id="ad-status" class="form-status" aria-live="polite"></p>
     <div id="ad-claim-area"></div>`,
   support: `<h2>🎧 Earnora Help Center</h2>
@@ -63,8 +68,10 @@ const pages = {
 
 function showPage(page) {
   content.innerHTML = pages[page] || pages.home;
+  content.querySelectorAll("[data-go-page]").forEach(button =>
+    button.addEventListener("click", () => showPage(button.dataset.goPage)));
   document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.page === page));
-  if (page === "tasks") { bindTaskPosting(); loadTasks(); }
+  if (page === "tasks") { renderAdminTaskPanel(); bindTaskPosting(); loadTasks(); }
   if (page === "referral") loadReferral();
   if (page === "ads") bindWatchAds();
   if (page === "profile") {
@@ -83,17 +90,64 @@ async function api(path, options = {}) {
   return data;
 }
 
-async function loadAccount() {
-  if (!tg?.initData) {
-    welcome.textContent = "Open this Mini App inside Telegram to sign in.";
-    content.innerHTML = `<h2>Open Earnora in Telegram</h2><p>Your Telegram account is required to load a real balance.</p><div class="notice">This preview does not create or credit a wallet balance.</div>`;
-    return;
+function animateBalance(targetCents) {
+  const from = Number(balance.dataset.cents || 0);
+  const to = Number(targetCents || 0);
+  balance.dataset.cents = String(to);
+  const started = performance.now();
+  const duration = 850;
+  const tick = now => {
+    const progress = Math.min(1, (now - started) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    balance.textContent = money(Math.round(from + (to - from) * eased));
+    if (progress < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+function hideSplash() {
+  const splash = document.getElementById("splash-screen");
+  if (splash) {
+    splash.classList.add("hide");
+    setTimeout(() => splash.remove(), 650);
   }
+}
+
+async function loadAccount() {
   try {
+    if (!tg?.initData) {
+      welcome.textContent = "Open this Mini App inside Telegram to sign in.";
+      content.innerHTML = `<h2>Open Earnora in Telegram</h2><p>Your Telegram account is required to load a real balance.</p><div class="notice">This preview does not create or credit a wallet balance.</div>`;
+      return;
+    }
     const data = await api("/api/me");
-    balance.textContent = money(data.user.balance_cents);
+    isAdmin = !!data.is_admin;
+    animateBalance(data.user.balance_cents);
     welcome.textContent = `Welcome, ${data.user.first_name || "Earnora user"}`;
-  } catch { welcome.textContent = "Unable to load account. Please try again."; }
+  } catch {
+    welcome.textContent = "Unable to load account. Please try again.";
+  } finally {
+    hideSplash();
+  }
+}
+
+function renderAdminTaskPanel() {
+  const panel = document.getElementById("admin-task-panel");
+  if (!panel || !isAdmin) return;
+  panel.innerHTML = `<section class="admin-panel"><div class="admin-panel-heading"><span>🛡️ ADMIN CONTROL</span><small>Admin account only</small></div><form id="admin-task-form" class="post-task-form"><h3>＋ Publish New Task</h3><label for="admin-task-title">Task title</label><input id="admin-task-title" maxlength="100" required placeholder="Task title"><label for="admin-task-description">Description</label><textarea id="admin-task-description" rows="3" maxlength="1000" placeholder="Task instructions"></textarea><label for="admin-task-url">Task URL</label><input id="admin-task-url" type="url" required placeholder="https://..."><label for="admin-task-type">Task type</label><select id="admin-task-type"><option value="manual">Manual verification</option><option value="telegram_join">Telegram join</option></select><label for="admin-task-chat">Telegram channel/group ID (join tasks only)</label><input id="admin-task-chat" placeholder="@channel or -100..."><button type="submit" class="primary-button">PUBLISH & NOTIFY USERS</button><p id="admin-task-status" class="form-status" aria-live="polite"></p></form></section>`;
+  document.getElementById("admin-task-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const status = document.getElementById("admin-task-status");
+    button.disabled = true; button.textContent = "PUBLISHING & NOTIFYING..."; status.textContent = "";
+    try {
+      const result = await api("/api/admin/tasks", { method: "POST", body: JSON.stringify({ title: document.getElementById("admin-task-title").value.trim(), description: document.getElementById("admin-task-description").value.trim(), target_url: document.getElementById("admin-task-url").value.trim(), task_type: document.getElementById("admin-task-type").value, chat_id: document.getElementById("admin-task-chat").value.trim() || null }) });
+      status.textContent = `Task #${result.task_id} published. Notifications sent: ${result.notifications_sent}; failed: ${result.notifications_failed}.`;
+      form.reset(); await loadTasks();
+    } catch (error) { status.textContent = error.message; }
+    finally { button.disabled = false; button.textContent = "PUBLISH & NOTIFY USERS"; }
+  });
 }
 
 function bindTaskPosting() {
@@ -175,37 +229,29 @@ async function loadTasks() {
   if (!holder) return;
   try {
     const data = await api("/api/tasks");
-    const tasks = data.tasks || [];
-    if (!tasks.length) { holder.innerHTML = `<div class="empty-state">No tasks are available right now. Please check again later.</div>`; return; }
-    const cards = tasks.map(task => {
+    if (!data.tasks?.length) { holder.outerHTML = `<div id="task-results" class="empty-state">No tasks are available right now. Please check again later.</div>`; return; }
+    holder.outerHTML = `<div id="task-results" class="task-list">${data.tasks.map(task => {
       const status = task.task_status || "available";
       let action = "";
-      if (task.claimed) action = `<button class="primary-button" disabled>✓ COMPLETED · REWARD CREDITED</button>`;
+      if (task.claimed) action = `<button class="primary-button" disabled>REWARD CLAIMED</button>`;
       else if (status === "verified") action = `<button class="primary-button task-claim" data-task-id="${Number(task.id)}">CLAIM ${money(task.reward_cents)}</button>`;
       else if (status === "pending") action = `<button class="primary-button" disabled>WAITING FOR REVIEW</button>`;
       else if (status === "rejected") action = `<button class="primary-button" disabled>REJECTED · CONTACT SUPPORT</button>`;
       else if (task.task_type === "telegram_join") action = `<button class="primary-button task-verify" data-task-id="${Number(task.id)}">VERIFY JOIN</button>`;
       else action = `<button class="primary-button task-submit" data-task-id="${Number(task.id)}">SUBMIT FOR VERIFICATION</button>`;
-      const tag = task.claimed ? "COMPLETED" : status === "verified" ? "VERIFIED" : status === "pending" ? "PENDING" : status === "rejected" ? "REJECTED" : "AVAILABLE";
-      const group = task.claimed ? "completed" : "available";
-      const note = task.claimed ? "Reward has been added to your balance." : task.task_type === "telegram_join" ? "Join the channel/group, then verify. Eligible rewards are credited automatically." : "Reward is credited after admin verification and claiming.";
-      return `<article class="task-card" data-task-group="${group}"><div class="task-top"><span class="task-tag">${tag}</span><strong>+${money(task.reward_cents)}</strong></div><h3>${escapeHtml(task.title)}</h3><p>${escapeHtml(task.description || "Complete this task to earn a reward.")}</p><a class="task-open" href="${safeUrl(task.target_url)}" target="_blank" rel="noopener noreferrer">OPEN TASK ↗</a>${action}<small class="muted-note">${note}</small><p class="form-status task-status" aria-live="polite"></p></article>`;
-    }).join("");
-    holder.innerHTML = `<div class="task-list">${cards}</div>`;
-    const tabs = content.querySelectorAll(".task-tab");
-    const filterTasks = group => {
-      tabs.forEach(tab => tab.classList.toggle("active", tab.dataset.taskTab === group));
-      holder.querySelectorAll(".task-card").forEach(card => { card.hidden = card.dataset.taskGroup !== group; });
-      const visible = [...holder.querySelectorAll(".task-card")].some(card => !card.hidden);
-      let empty = holder.querySelector(".task-filter-empty");
-      if (!visible && !empty) { empty = document.createElement("div"); empty.className = "empty-state task-filter-empty"; empty.textContent = group === "completed" ? "You have no completed tasks yet." : "No available tasks right now."; holder.appendChild(empty); }
-      if (visible && empty) empty.remove();
-    };
-    tabs.forEach(tab => tab.addEventListener("click", () => filterTasks(tab.dataset.taskTab)));
-    filterTasks("available");
+      const tag = task.claimed ? "REWARD CLAIMED" : status === "verified" ? "VERIFIED" : status === "pending" ? "PENDING" : status === "rejected" ? "REJECTED" : "AVAILABLE";
+      const adminRemove = isAdmin ? `<button class="admin-remove-button" type="button" data-remove-task-id="${Number(task.id)}">REMOVE TASK</button>` : "";
+      return `<article class="task-card"><div class="task-top"><span class="task-tag">${tag}</span><strong>+${money(task.reward_cents)}</strong></div><h3>${escapeHtml(task.title)}</h3><p>${escapeHtml(task.description || "Complete this task to earn a reward.")}</p><a class="task-open" href="${safeUrl(task.target_url)}" target="_blank" rel="noopener noreferrer">OPEN TASK ↗</a>${action}${adminRemove}<small class="muted-note">Reward is credited only after verification and claiming.</small><p class="form-status task-status" aria-live="polite"></p></article>`;
+    }).join("")}</div>`;
     content.querySelectorAll(".task-submit").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/complete")));
     content.querySelectorAll(".task-verify").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/verify")));
     content.querySelectorAll(".task-claim").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/claim")));
+    content.querySelectorAll(".admin-remove-button").forEach(button => button.addEventListener("click", async () => {
+      if (!isAdmin || !confirm(`Remove Task #${button.dataset.removeTaskId}?`)) return;
+      button.disabled = true; button.textContent = "REMOVING...";
+      try { await api("/api/admin/tasks/remove", { method: "POST", body: JSON.stringify({ task_id: Number(button.dataset.removeTaskId) }) }); await loadTasks(); }
+      catch (error) { button.disabled = false; button.textContent = "REMOVE TASK"; alert(error.message); }
+    }));
   } catch (error) { holder.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`; }
 }
 
@@ -220,7 +266,7 @@ async function submitTaskAction(button, path) {
       status.textContent = `Reward ${money(result.reward_cents)} credited to your balance.`;
       await loadAccount();
     } else if (path === "/api/tasks/verify" && result.status === "verified") {
-      status.textContent = result.claimed ? `Membership verified. ${money(result.reward_cents)} was automatically credited!` : "Membership verified.";
+      status.textContent = "Membership verified. Claim your reward.";
     } else status.textContent = result.status === "verified" ? "Already verified. Claim your reward." : "Submitted. Waiting for admin verification.";
     await loadTasks();
   } catch (error) { button.disabled = false; button.textContent = path.endsWith("claim") ? "CLAIM REWARD" : path.endsWith("verify") ? "VERIFY JOIN" : "SUBMIT FOR VERIFICATION"; status.textContent = error.message; }
