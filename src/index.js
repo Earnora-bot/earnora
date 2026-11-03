@@ -266,10 +266,21 @@ async function verifyTask(db, env, uid, taskId) {
     await db.prepare(`UPDATE task_completions SET status = 'verified', verified_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'pending'`).bind(completion.id).run();
   }
+  // Telegram join tasks are auto-claimed only after Telegram confirms membership.
+  // claimTask uses a unique ledger reference, so repeated verification cannot double-credit.
+  let autoCredited = false;
+  if (!completion.claimed_at) {
+    const claim = await claimTask(db, uid, taskId);
+    if (claim.error && claim.error !== "Reward already claimed") {
+      return { error: claim.error, status: claim.status || 500 };
+    }
+    autoCredited = !!claim.ok;
+  }
   await notifyReferralAfterFirstTask(db, uid);
   const updated = await db.prepare(`SELECT status, claimed_at FROM task_completions WHERE id = ?`)
     .bind(completion.id).first();
-  return { ok: true, status: updated.status, claimed: !!updated.claimed_at, reward_cents: task.reward_cents };
+  return { ok: true, status: updated.status, claimed: !!updated.claimed_at,
+    auto_credited: autoCredited, reward_cents: task.reward_cents };
 }
 
 async function claimTask(db, uid, taskId) {
