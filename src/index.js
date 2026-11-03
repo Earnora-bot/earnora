@@ -266,21 +266,10 @@ async function verifyTask(db, env, uid, taskId) {
     await db.prepare(`UPDATE task_completions SET status = 'verified', verified_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'pending'`).bind(completion.id).run();
   }
-  // Telegram join tasks are auto-claimed only after Telegram confirms membership.
-  // claimTask uses a unique ledger reference, so repeated verification cannot double-credit.
-  let autoCredited = false;
-  if (!completion.claimed_at) {
-    const claim = await claimTask(db, uid, taskId);
-    if (claim.error && claim.error !== "Reward already claimed") {
-      return { error: claim.error, status: claim.status || 500 };
-    }
-    autoCredited = !!claim.ok;
-  }
   await notifyReferralAfterFirstTask(db, uid);
   const updated = await db.prepare(`SELECT status, claimed_at FROM task_completions WHERE id = ?`)
     .bind(completion.id).first();
-  return { ok: true, status: updated.status, claimed: !!updated.claimed_at,
-    auto_credited: autoCredited, reward_cents: task.reward_cents };
+  return { ok: true, status: updated.status, claimed: !!updated.claimed_at, reward_cents: task.reward_cents };
 }
 
 async function claimTask(db, uid, taskId) {
@@ -457,7 +446,7 @@ async function handleApi(request, env, url, auth) {
   if (path === "/api/me" && request.method === "GET") {
     const account = await db.prepare(`SELECT telegram_id, username, first_name, balance_cents
       FROM users WHERE telegram_id = ?`).bind(uid).first();
-    return json({ user: account });
+    return json({ user: account, is_admin: uid === ADMIN_ID });
   }
 
   if (path === "/api/tasks" && request.method === "GET") {
@@ -611,13 +600,42 @@ async function handleApi(request, env, url, auth) {
       const result = await db.prepare(`INSERT INTO tasks
         (title, description, reward_cents, target_url, active, task_type, chat_id)
         VALUES (?, ?, ?, ?, 1, ?, ?)`).bind(title, description, TASK_REWARD_CENTS, targetUrl, taskType, chatId).run();
-      return json({ ok: true, task_id: result.meta?.last_row_id || null }, 201);
+      const taskId = result.meta?.last_row_id || null;
+      const users = await db.prepare(`SELECT telegram_id FROM users WHERE is_banned = 0 ORDER BY telegram_id`).all();
+      const recipients = users.results || [];
+      const notification = `🌟 New Task Available 📣\n\n💰COMPLETE AND EARN REWARD🎉\n\n${title}\nReward: $${(TASK_REWARD_CENTS / 100).toFixed(2)}`;
+      let sent = 0, failed = 0;
+      for (let i = 0; i < recipients.length; i += 20) {
+        const batch = recipients.slice(i, i + 20);
+        const outcomes = await Promise.all(batch.map(async row => {
+          try {
+            const extra = env.MINI_APP_URL ? { reply_markup: { inline_keyboard: [[{ text: "OPEN EARNORA TASKS", web_app: { url: env.MINI_APP_URL } }]] } } : {};
+            await telegramSend(env, row.telegram_id, notification, extra);
+            return true;
+          } catch (error) { console.error("New task broadcast failed:", row.telegram_id, error.message); return false; }
+        }));
+        sent += outcomes.filter(Boolean).length;
+        failed += outcomes.length - outcomes.filter(Boolean).length;
+        if (i + 20 < recipients.length) await new Promise(resolve => setTimeout(resolve, 1100));
+      }
+      return json({ ok: true, task_id: taskId, notifications_sent: sent, notifications_failed: failed }, 201);
     }
 
     if (path === "/api/admin/tasks" && request.method === "GET") {
       const result = await db.prepare(`SELECT id, title, description, reward_cents, target_url, active, task_type, chat_id
         FROM tasks ORDER BY id DESC`).all();
       return json({ tasks: result.results || [] });
+    }
+
+    if (path === "/api/admin/tasks/remove" && request.method === "POST") {
+      const body = await request.json().catch(() => null);
+      const taskId = Number(body?.task_id);
+      if (!Number.isInteger(taskId) || taskId < 1) return json({ error: "Valid task ID required" }, 400);
+      const removed = await db.prepare(`UPDATE tasks SET active = 0 WHERE id = ? AND active = 1`).bind(taskId).run();
+      if (!removed.meta?.changes) return json({ error: "Active task not found" }, 404);
+      await db.prepare(`INSERT INTO admin_audit (admin_id, action, target_id, details)
+        VALUES (?, 'task_removed', ?, 'Task deactivated by admin')`).bind(uid, String(taskId)).run();
+      return json({ ok: true, task_id: taskId, removed: true });
     }
 
     if (path === "/api/admin/verify-task" && request.method === "POST") {
