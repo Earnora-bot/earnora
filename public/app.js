@@ -1,3 +1,4 @@
+
 const tg = window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
@@ -229,20 +230,27 @@ async function loadTasks() {
   if (!holder) return;
   try {
     const data = await api("/api/tasks");
-    if (!data.tasks?.length) { holder.outerHTML = `<div id="task-results" class="empty-state">No tasks are available right now. Please check again later.</div>`; return; }
-    holder.outerHTML = `<div id="task-results" class="task-list">${data.tasks.map(task => {
+    const tasks = data.tasks || [];
+    const completedTasks = data.completed_tasks || [];
+    const availableHtml = tasks.length ? tasks.map(task => {
       const status = task.task_status || "available";
       let action = "";
-      if (task.claimed) action = `<button class="primary-button" disabled>REWARD CLAIMED</button>`;
-      else if (status === "verified") action = `<button class="primary-button task-claim" data-task-id="${Number(task.id)}">CLAIM ${money(task.reward_cents)}</button>`;
+      if (status === "verified") action = `<button class="primary-button task-claim" data-task-id="${Number(task.id)}">CLAIM ${money(task.reward_cents)}</button>`;
       else if (status === "pending") action = `<button class="primary-button" disabled>WAITING FOR REVIEW</button>`;
       else if (status === "rejected") action = `<button class="primary-button" disabled>REJECTED · CONTACT SUPPORT</button>`;
       else if (task.task_type === "telegram_join") action = `<button class="primary-button task-verify" data-task-id="${Number(task.id)}">VERIFY JOIN</button>`;
       else action = `<button class="primary-button task-submit" data-task-id="${Number(task.id)}">SUBMIT FOR VERIFICATION</button>`;
-      const tag = task.claimed ? "REWARD CLAIMED" : status === "verified" ? "VERIFIED" : status === "pending" ? "PENDING" : status === "rejected" ? "REJECTED" : "AVAILABLE";
+      const tag = status === "verified" ? "VERIFIED · CLAIM REWARD" : status === "pending" ? "PENDING" : status === "rejected" ? "REJECTED" : "AVAILABLE";
+      const taskLink = status === "available"
+        ? `<a class="task-open" href="${safeUrl(task.target_url)}" target="_blank" rel="noopener noreferrer">OPEN TASK ↗</a>`
+        : `<span class="task-open task-open-disabled">${status === "verified" ? "TASK FINISHED · CLAIM REWARD" : "TASK ALREADY SUBMITTED"}</span>`;
       const adminRemove = isAdmin ? `<button class="admin-remove-button" type="button" data-remove-task-id="${Number(task.id)}">REMOVE TASK</button>` : "";
-      return `<article class="task-card"><div class="task-top"><span class="task-tag">${tag}</span><strong>+${money(task.reward_cents)}</strong></div><h3>${escapeHtml(task.title)}</h3><p>${escapeHtml(task.description || "Complete this task to earn a reward.")}</p><a class="task-open" href="${safeUrl(task.target_url)}" target="_blank" rel="noopener noreferrer">OPEN TASK ↗</a>${action}${adminRemove}<small class="muted-note">Reward is credited only after verification and claiming.</small><p class="form-status task-status" aria-live="polite"></p></article>`;
-    }).join("")}</div>`;
+      return `<article class="task-card"><div class="task-top"><span class="task-tag">${tag}</span><strong>+${money(task.reward_cents)}</strong></div><h3>${escapeHtml(task.title)}</h3><p>${escapeHtml(task.description || "Complete this task to earn a reward.")}</p>${taskLink}${action}${adminRemove}<small class="muted-note">Reward is credited only after verification and claiming.</small><p class="form-status task-status" aria-live="polite"></p></article>`;
+    }).join("") : `<div class="empty-state">No available tasks right now. Please check again later.</div>`;
+    const completedHtml = completedTasks.length ? completedTasks.map(task =>
+      `<article class="task-card completed-task-card"><div class="task-top"><span class="task-tag completed-task-tag">✓ COMPLETED</span><strong class="completed-reward">+${money(task.reward_cents)}</strong></div><h3>${escapeHtml(task.title)}</h3><p>${escapeHtml(task.description || "Task completed successfully.")}</p><div class="completed-task-meta">Reward claimed · ${escapeHtml(task.claimed_at || "")}</div></article>`
+    ).join("") : `<div class="empty-state">Completed tasks will appear here after you claim their rewards.</div>`;
+    holder.outerHTML = `<div id="task-results"><h3 class="task-section-title">📋 Available Tasks</h3><div class="task-list">${availableHtml}</div><section class="completed-tasks-section"><h3 class="task-section-title">✅ Completed Tasks <span>${completedTasks.length}</span></h3><div class="task-list">${completedHtml}</div></section></div>`;
     content.querySelectorAll(".task-submit").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/complete")));
     content.querySelectorAll(".task-verify").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/verify")));
     content.querySelectorAll(".task-claim").forEach(button => button.addEventListener("click", () => submitTaskAction(button, "/api/tasks/claim")));
@@ -392,7 +400,14 @@ async function loadReferral() {
   if (!holder) return;
   try {
     const data = await api("/api/referral");
-    holder.innerHTML = `<div class="referral-count"><strong>${Number(data.verified_referrals || 0)}</strong><span>Verified referrals</span></div><label for="my-referral-link">Your personal referral link</label><div class="copy-row"><input id="my-referral-link" value="${escapeHtml(data.referral_link)}" readonly><button id="copy-referral" type="button" class="copy-button">COPY</button></div><p id="copy-status" class="form-status" aria-live="polite"></p>`;
+    const referrals = data.referrals || [];
+    const referralRows = referrals.length ? referrals.map(ref => {
+      const name = ref.first_name || (ref.username ? `@${ref.username}` : `User ${String(ref.invitee_id).slice(-4)}`);
+      const verified = ref.status === "verified";
+      const status = verified ? "VERIFIED" : ref.status === "rejected" ? "REJECTED" : "UNVERIFIED";
+      return `<div class="referral-user-row"><span class="referral-user-name">${escapeHtml(name)}</span><span class="referral-status ${verified ? "verified" : ref.status === "rejected" ? "rejected" : "unverified"}">${status}</span></div>`;
+    }).join("") : `<div class="empty-state">No referrals yet. Share your link to invite friends.</div>`;
+    holder.innerHTML = `<div class="referral-count"><strong>${Number(data.verified_referrals || 0)}</strong><span>Verified referrals</span></div><label for="my-referral-link">Your personal referral link</label><div class="copy-row"><input id="my-referral-link" value="${escapeHtml(data.referral_link)}" readonly><button id="copy-referral" type="button" class="copy-button">COPY</button></div><p id="copy-status" class="form-status" aria-live="polite"></p><section class="referral-list-section"><h3>👥 Your Referrals <span>${referrals.length}</span></h3><div class="referral-user-list">${referralRows}</div></section>`;
     document.getElementById("copy-referral").addEventListener("click", async () => {
       const input = document.getElementById("my-referral-link");
       try { await navigator.clipboard.writeText(input.value); }
