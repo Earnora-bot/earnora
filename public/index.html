@@ -3,15 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#09090c">
+  <meta name="theme-color" content="#071426">
   <title>Earnora</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://libtl.com/sdk.js" data-zone="12181637" data-sdk="show_12181637"></script>
 </head>
 <body>
+  <div id="splash-screen" class="splash-screen" aria-label="Loading Earnora">
+    <div class="splash-orbit orbit-one"></div><div class="splash-orbit orbit-two"></div>
+    <div class="splash-logo">E</div>
+    <div class="splash-wordmark">EARN<span>ORA</span></div>
+    <p class="splash-tagline">EARN MORE · GROW MORE</p>
+    <div class="splash-loader"><span></span></div>
+    <small>PREPARING YOUR DASHBOARD</small>
+  </div>
   <main class="app">
-    <header><div class="logo">⚡ EARNORA</div><span class="online">● ONLINE</span></header>
+    <header><div class="logo"><span class="logo-mark">E</span> EARNORA</div><span class="online">● ONLINE</span></header>
     <section class="balance"><p>TOTAL BALANCE</p><h1 id="balance">$0.00</h1><small id="welcome">Your earning dashboard</small></section>
     <nav class="bottom-nav" aria-label="Main navigation">
       <button class="nav-item active" data-page="home" aria-label="Home"><span class="nav-icon">⌂</span><span>HOME</span></button>
