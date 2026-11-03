@@ -292,6 +292,56 @@ async function claimTask(db, uid, taskId) {
   return { ok: true, reward_cents: completion.reward_cents };
 }
 
+async function claimMonetagAd(db, uid, ymid) {
+  const event = await db.prepare(`
+    SELECT id, reward_cents, status
+    FROM ad_events
+    WHERE provider_event_id = ?
+      AND telegram_id = ?
+  `).bind(ymid, uid).first();
+
+  if (!event) {
+    return { error: "Ad reward not found.", status: 404 };
+  }
+
+  if (!["verified", "claimed"].includes(event.status)) {
+    return { error: "Ad reward is not verified yet.", status: 409 };
+  }
+
+  await db.batch([
+    db.prepare(`
+      UPDATE ad_events
+      SET status = 'claimed'
+      WHERE id = ?
+        AND telegram_id = ?
+        AND status = 'verified'
+    `).bind(event.id, uid),
+
+    db.prepare(`
+      INSERT OR IGNORE INTO ledger
+        (telegram_id, amount_cents, reason, reference_id)
+      SELECT telegram_id, reward_cents, 'monetag_ad',
+        'monetag:' || id
+      FROM ad_events
+      WHERE id = ?
+        AND telegram_id = ?
+        AND status = 'claimed'
+    `).bind(event.id, uid)
+  ]);
+
+  const credited = await db.prepare(`
+    SELECT id FROM ledger
+    WHERE reference_id = ?
+      AND telegram_id = ?
+  `).bind(`monetag:${event.id}`, uid).first();
+
+  if (!credited) {
+    return { error: "Could not claim reward.", status: 500 };
+  }
+
+  return { ok: true, reward_cents: event.reward_cents };
+}
+
 async function handleApi(request, env, url, auth) {
   const { uid } = auth;
   const db = env.DB;
