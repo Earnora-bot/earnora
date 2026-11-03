@@ -50,9 +50,9 @@ const pages = {
   profile: `<h2>👤 Profile</h2>
     <p>Manage your Earnora account and get official updates.</p>
     <div class="profile-links">
-      <a class="profile-link official-link" href="https://t.me/flash_bot_update" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">📣</span><span class="profile-link-copy"><strong>Official Channel</strong><small>@flash_bot_update</small></span><span class="profile-link-action">OPEN ↗</span></a>
+      <a class="profile-link official-link" href="https://t.me/Earnora_bot_update" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">📣</span><span class="profile-link-copy"><strong>Official Channel</strong><small>@flash_bot_update</small></span><span class="profile-link-action">OPEN ↗</span></a>
       <a class="profile-link help-link" href="#support" id="open-support"><span class="profile-link-icon">🎧</span><span class="profile-link-copy"><strong>Help Center</strong><small>Contact Earnora Support</small></span><span class="profile-link-action">HELP ↗</span></a>
-      <a class="profile-link payment-link" href="https://t.me/flash_bot_pay" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">🧾</span><span class="profile-link-copy"><strong>Payment Channel</strong><small>@flash_bot_pay · Payment proofs</small></span><span class="profile-link-action">VIEW ↗</span></a>
+      <a class="profile-link payment-link" href="https://t.me/Earnora_bot_pay" target="_blank" rel="noopener noreferrer"><span class="profile-link-icon">🧾</span><span class="profile-link-copy"><strong>Payment Channel</strong><small>@flash_bot_pay · Payment proofs</small></span><span class="profile-link-action">VIEW ↗</span></a>
     </div>
     <h3>💸 Withdraw Funds</h3>
     <div class="withdraw-summary"><span>Minimum withdrawal</span><strong>$3.00</strong></div>
