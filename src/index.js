@@ -336,7 +336,7 @@ async function handleApi(request, env, url, auth) {
       inserted = await db.prepare(`INSERT INTO task_post_requests
         (telegram_id, title, description, target_url, task_type, chat_id, tx_hash, amount_cents, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
-        .bind(uid, title, description, targetUrl, taskType, chatId, txHash, TASK_POST_FEE_CENTS * 20).run();
+        .bind(uid, title, description, targetUrl, taskType, chatId, txHash, TASK_POST_FEE_CENTS).run();
     } catch (error) {
       if (/UNIQUE|constraint/i.test(error.message || "")) return json({ error: "This transaction hash has already been submitted." }, 409);
       throw error;
